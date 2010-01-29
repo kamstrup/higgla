@@ -97,7 +97,9 @@ public class QueryActor extends HigglaActor {
         // and return to sender
         IndexSearcher searcher = null;
         IndexReader reader = null;
-        Box result = Box.newMap();
+        Box envelope = Box.newMap();
+        Box results = Box.newList();
+        envelope.put("__results__", results);
         try {
             searcher = takeSearcher(base);
             reader = searcher.getIndexReader();
@@ -106,10 +108,9 @@ public class QueryActor extends HigglaActor {
                 Document doc = reader.document(scoreDoc.doc);
                 Box resultBox = boxParser.parse(
                                     doc.getField("__body__").stringValue());
-                String resultId = doc.getField("__id__").stringValue();
-                result.put(resultId, resultBox);
+                results.add(resultBox);
             }
-            send(result, message.getSender());
+            send(envelope, message.getSender());
         } catch (IOException e) {
             send(
                formatMsg("error", "Error executing query: %s", e.getMessage()),
