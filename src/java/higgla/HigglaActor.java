@@ -14,10 +14,19 @@ import juglr.MessageFormatException;
  */
 public abstract class HigglaActor extends Actor {
 
+    String[] mandatoryFields;
+
+    public HigglaActor(String... mandatoryFields) {
+        this.mandatoryFields = mandatoryFields;
+    }
+
     /**
      * Throw a {@link MessageFormatException} if {@code msg} is not valid for
      * this actor and return the message casted to a {@link Box} in case it
      * was valid.
+     * <p/>
+     * Validation s performed by iterating over all {@code mandatoryFields}
+     * passed to the constructor and checking that they are present.
      * @param msg the message to validate
      * @return {@code msg} casted as a {@link Box}
      * @throws MessageFormatException if the message is invalid
@@ -29,10 +38,10 @@ public abstract class HigglaActor extends Actor {
                     msg.getClass().getName(), Box.class.getName()));
 
         Box box = (Box)msg;
-        if (!box.has("__id__"))
-            throw missingField("__id__");
-        if (!box.has("__base__"))
-            throw missingField("__base__");
+        for (String field : mandatoryFields) {
+            if (!box.has(field))
+                throw missingField(field);
+        }        
 
         Box index = box.get("__index__");
         if (index != null &&
@@ -44,7 +53,7 @@ public abstract class HigglaActor extends Actor {
         return box;
     }
 
-    protected MessageFormatException missingField(String fieldName) {
+    private MessageFormatException missingField(String fieldName) {
         return new MessageFormatException(
                "Message does not contain contain mandatory field " + fieldName);
     }
