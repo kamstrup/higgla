@@ -41,7 +41,7 @@ public class StoreActor extends HigglaActor {
     private BoxReader reader;
 
     public StoreActor() {
-        super();
+        super("__id__", "__base__");
         analyzer = new StandardAnalyzer(
                             Version.LUCENE_CURRENT, Collections.EMPTY_SET);
         reader = new JSonBoxReader(Box.newMap());
@@ -101,8 +101,9 @@ public class StoreActor extends HigglaActor {
         try {
             reader.reset(box);
             Document doc = new Document();
-            doc.add(new Field("__id__", id, Store.NO, Index.NOT_ANALYZED));
-            doc.add(new Field("__body__", reader));
+            doc.add(new Field("__id__", id, Store.YES, Index.NOT_ANALYZED));
+            doc.add(new Field(
+                 "__body__", reader.asString(), Store.YES, Index.NOT_ANALYZED));
             for (String indexField : index) {
                 Box field = box.get(indexField);
                 doc.add(new Field(
