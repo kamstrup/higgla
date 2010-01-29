@@ -1,4 +1,4 @@
-package higgla;
+package higgla.server;
 
 import juglr.*;
 import org.apache.lucene.document.Document;

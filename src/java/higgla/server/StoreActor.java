@@ -1,4 +1,4 @@
-package higgla;
+package higgla.server;
 
 import juglr.*;
 import org.apache.lucene.analysis.Analyzer;
@@ -16,7 +16,6 @@ import java.io.File;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.LinkedList;
 import java.util.List;
 
 /**

@@ -118,7 +118,7 @@
         <jar basedir="${build.dir}" compress="true" jarfile="${release}.jar">
             <manifest>
                 <attribute name="Build-By" value="mke@statsbiblioteket.dk"/>
-                <attribute name="Main-Class" value="higgla.Main"/>
+                <attribute name="Main-Class" value="higgla.server.Main"/>
             </manifest>
         </jar>
     </target>
