@@ -33,7 +33,7 @@
   For this reason Higgla ships a stand alone jsr166.jar as found
   on http://gee.cs.oswego.edu/dl/concurrency-interest/index.html.
   Since JSR166 adds classes to the java namespace you have to
-  include it in your boot classpath with -Xbootclasspath/p:jsr166.jar
+  include it in your boot classpath with -Xbootclasspath/p:lib/jsr166.jar
   when using Higgla with Java 6.
 
   PROJECT HOSTING

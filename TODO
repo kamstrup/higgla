@@ -7,3 +7,6 @@ TODO for Higgla
  * Implement document versioning
  * StoreActor should accept LISTs of documents instead or one document
  * Implement a LookupActor that fetches documents for a list of ids
+ * Consider if/how we do paging of large result sets
+ * Consider if/how to do sorting
+ * Consider if/how to do prefix queryies and negations
