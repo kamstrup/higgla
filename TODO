@@ -1,0 +1,9 @@
+TODO for Higgla
+---------------
+
+ * Optimize writing by caching the IndexWriter
+ * Optimize querying by caching the index reader+searcher
+ * Allow indexing and querying of nested objects by concatenating field names with '#'
+ * Implement document versioning
+ * StoreActor should accept LISTs of documents instead or one document
+ * Implement a LookupActor that fetches documents for a list of ids
