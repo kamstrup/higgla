@@ -16,10 +16,12 @@ public class Main {
 
         // Set up all central actors
         Actor store = new StoreActor();
+        Actor query = new QueryActor();
 
         // Register addresses
         try {
             MessageBus.getDefault().allocateNamedAddress(store, "store");
+            MessageBus.getDefault().allocateNamedAddress(query, "query");
         } catch (AddressAlreadyOwnedException e) {
             System.err.println(
                     "Failed to allocate address on the message bus: "
@@ -32,7 +34,7 @@ public class Main {
 
         // Indefinite non-busy block
         synchronized (store) {
-            try {
+            try {                
                 store.wait();
             } catch (InterruptedException e) {
                 System.err.println("Interrupted");
