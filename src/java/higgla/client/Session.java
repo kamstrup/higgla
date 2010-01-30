@@ -4,6 +4,7 @@ import juglr.Box;
 import juglr.JSonBoxReader;
 
 import java.io.*;
+import java.net.InetAddress;
 import java.net.Socket;
 import java.net.UnknownHostException;
 import java.util.List;
@@ -15,12 +16,13 @@ public class Session {
 
     public static final String USER_AGENT = "Higgla/0.0.1";
 
-    private String host;
+    private InetAddress host;
     private String base;
     private int port;
 
-    public Session(String host, int port, String base){
-        this.host = host;
+    public Session(String host, int port, String base)
+                                                   throws UnknownHostException {
+        this.host = InetAddress.getByName(host);
         this.port = port;
         this.base = base;
     }
