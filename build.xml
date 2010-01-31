@@ -66,7 +66,7 @@
         <condition property="hasAnt">
             <antversion atleast="${project.ant.version}"/>
         </condition>
-        <fail message="Currently Juglr only compiles with Ant ${project.ant.version}. Found Ant ${ant.version}"
+        <fail message="Currently Higgla only compiles with Ant ${project.ant.version}. Found Ant ${ant.version}"
               unless="hasAnt"/>
     </target>
 
