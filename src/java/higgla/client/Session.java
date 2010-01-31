@@ -1,12 +1,21 @@
 package higgla.client;
 
 import juglr.Box;
+import juglr.BoxParser;
+import juglr.JSonBoxParser;
 import juglr.JSonBoxReader;
+import juglr.net.HTTP;
+import static juglr.net.HTTP.*;
+import juglr.net.HTTPRequestWriter;
+import juglr.net.HTTPResponseReader;
 
 import java.io.*;
 import java.net.InetAddress;
-import java.net.Socket;
+import java.net.InetSocketAddress;
 import java.net.UnknownHostException;
+import java.nio.ByteBuffer;
+import java.nio.CharBuffer;
+import java.nio.channels.SocketChannel;
 import java.util.List;
 
 /**
@@ -19,12 +28,14 @@ public class Session {
     private InetAddress host;
     private String base;
     private int port;
+    private InetSocketAddress socketAddress;
 
     public Session(String host, int port, String base)
                                                    throws UnknownHostException {
         this.host = InetAddress.getByName(host);
         this.port = port;
         this.base = base;
+        this.socketAddress = new InetSocketAddress(host, port);
     }
 
     public Box newDocument(String id, String... indexFields) {
@@ -62,40 +73,74 @@ public class Session {
 
     public List<Box> sendQuery(Query q) throws IOException, HigglaException {
         Box rawQuery = q.getRawQuery();
-        Box resp = send("POST", "/actor/query/", rawQuery);
+        Box resp = send(HTTP.Method.POST, "/actor/query/", rawQuery);
         return resp.getList("__results__");
     }
 
-    public void store(Box box) throws IOException, HigglaException {
-        send("POST", "/actor/store/", box);
+    public Box store(Box... boxes) throws IOException, HigglaException {
+        Box envelope = Box.newMap();
+        Box list = Box.newList();
+        for (Box box : boxes) {
+            list.add(box);
+        }
+        envelope.put("__store__", list);
+        return send(HTTP.Method.POST, "/actor/store/", envelope);
     }
 
-    public Box send(String method, String address, Box box)
+    public Box store(Iterable<Box> boxes) throws IOException, HigglaException {
+        Box envelope = Box.newMap();
+        Box list = Box.newList();
+        for (Box box : boxes) {
+            list.add(box);
+        }
+        envelope.put("__store__", list);
+        return send(HTTP.Method.POST, "/actor/store/", envelope);
+    }
+
+    public Box send(HTTP.Method method, String address, Box box)
                                            throws IOException, HigglaException {
         return send(method, address, new JSonBoxReader(box));
     }
 
-    public Box send(String method, String address, Reader msg)
+    public Box send(HTTP.Method method, String address, Reader msg)
                                            throws IOException, HigglaException {
-        Socket socket = new Socket(host, port);
-        Writer out = new BufferedWriter(
-                            new OutputStreamWriter(socket.getOutputStream()));
-        out.append(method).append(" ").append(address).append(" / HTTP/1.0\r\n");
-        out.append("User-Agent: ").append(USER_AGENT).append("\r\n");
-        out.append("\r\n");
+        ByteBuffer buf = ByteBuffer.allocate(1024);
+        SocketChannel channel = SocketChannel.open(socketAddress);
 
-        char[] buf = new char[1024];
+        // Send request
+        HTTPRequestWriter w = new HTTPRequestWriter(channel, buf);
+        w.writeMethod(method);
+        w.writeUri(address);
+        w.writeVersion(HTTP.Version.ONE_ZERO);
+        w.writeHeader("User-Agent", USER_AGENT);
+        w.startBody();
+
+        char[] cbuf = new char[1024];
         int len;
-        while ((len = msg.read(buf)) != -1) {
-            out.write(buf, 0, len);
+        while ((len = msg.read(cbuf)) != -1) {
+            w.writeBody(CharBuffer.wrap(cbuf, 0, len));
         }
-        out.flush();        
+        w.flush();
 
-        Reader in = new InputStreamReader(socket.getInputStream());
-        while ((len = in.read(buf)) != -1) {
-            System.out.print(new String(buf, 0, len));
+        // Read response
+        buf.clear();
+        HTTPResponseReader r = new HTTPResponseReader(channel, buf);
+        Version v = r.readVersion();
+        if (v == Version.ERROR || v == Version.UNKNOWN) {
+            throw new HigglaException("Bad protocol version version");
         }
-        System.out.println(); // Flush
-        throw new UnsupportedOperationException("TODO: Parser HTTP response");
+        int status = r.readStatus().httpOrdinal();
+        if (status < 200 || status >= 300) {
+            channel.close();
+            throw new HigglaException("Bad response code " + status);
+        }
+
+        byte[] bbuf = new byte[1024];
+        while ((len = r.readHeaderField(bbuf)) > 0) {
+            // Ignore headers
+        }
+
+        BoxParser parser = new JSonBoxParser();
+        return parser.parse(new InputStreamReader(r.streamBody()));
     }
 }

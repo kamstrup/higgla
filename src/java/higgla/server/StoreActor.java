@@ -40,7 +40,7 @@ public class StoreActor extends HigglaActor {
     private BoxReader reader;
 
     public StoreActor() {
-        super("__id__", "__base__");
+        super("__store__");
         analyzer = new StandardAnalyzer(
                             Version.LUCENE_CURRENT, Collections.EMPTY_SET);
         reader = new JSonBoxReader(Box.newMap());
@@ -48,37 +48,54 @@ public class StoreActor extends HigglaActor {
 
     @Override
     public void react(Message message) {
-        Box box;
+        Box envelope;
         try {
-            box = validate(message);
+            envelope = validate(message);
         } catch (MessageFormatException e) {
             send(
                formatMsg("error", "Invalid message format: %s", e.getMessage()),
                message.getSender());
             return;
         }
-        
-        String base = box.getString("__base__");
-        String id = box.getString("__id__");
-        List<String> index;
-        Box _index = box.get("__index__");
-        if (_index != null) {
-            index = new ArrayList<String>(_index.size());
-            for (Box indexField : _index.getList()) {
-                index.add(indexField.getString());
-            }
-        } else {
-            index = Collections.EMPTY_LIST;
+
+        Box list = envelope.get("__store__");
+        if (list == null) {
+            send(formatMsg("error", "Nothing to store"),
+                 message.getSender());
+            return;
         }
 
-        try {
-            storeBox(id, base, index, box);
-        } catch (IOException e) {
+        if (list.getType() != Box.Type.LIST) {
             send(
-             formatMsg("error", "Failed to store '%s': %s", id, e.getMessage()),
-             message.getSender());
-        } finally {
-            send(formatMsg("stored", id), message.getSender());
+                formatMsg("error",
+                    "__store__ field must be a list, found %s", list.getType()),
+                 message.getSender());
+            return;
+        }
+
+        Box response = Box.newMap();
+        for (Box box : list.getList()) {
+            String base = box.getString("__base__");
+            String id = box.getString("__id__");
+            List<String> index;
+            Box _index = box.get("__index__");
+            if (_index != null) {
+                index = new ArrayList<String>(_index.size());
+                for (Box indexField : _index.getList()) {
+                    index.add(indexField.getString());
+                }
+            } else {
+                index = Collections.EMPTY_LIST;
+            }
+
+            try {
+                storeBox(id, base, index, box);
+                response.put(id, "ok");
+            } catch (IOException e) {
+                response.put(id, "error - " + e.getMessage());
+            } finally {
+                send(response, message.getSender());
+            }
         }
     }
 
