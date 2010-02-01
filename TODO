@@ -10,8 +10,7 @@ TODO for Higgla
   - Handle numeric fields
   - Handle boolean fields
   - Allow verbatim/keyword fields by having a __keys__ list, just like
-    the __index__ list cirrently used
- * Implement a LookupActor that fetches documents for a list of ids
+    the __index__ list currently used
  * Consider if/how we do paging of large result sets
  * Consider if/how to do sorting
  * Consider if/how to do prefix queryies and negations
