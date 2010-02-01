@@ -17,11 +17,13 @@ public class Main {
         // Set up all central actors
         Actor store = new StoreActor();
         Actor query = new QueryActor();
+        Actor get = new GetActor();
 
         // Register addresses
         try {
             MessageBus.getDefault().allocateNamedAddress(store, "store");
             MessageBus.getDefault().allocateNamedAddress(query, "query");
+            MessageBus.getDefault().allocateNamedAddress(get, "get");
         } catch (AddressAlreadyOwnedException e) {
             System.err.println(
                     "Failed to allocate address on the message bus: "
