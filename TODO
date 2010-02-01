@@ -7,8 +7,6 @@ TODO for Higgla
    with '#', '/', or some other suitable character
  * Implement document versioning
  * Alternative indexing of documents:
-  - Handle numeric fields
-  - Handle boolean fields
   - Allow verbatim/keyword fields by having a __keys__ list, just like
     the __index__ list currently used
  * Consider if/how we do paging of large result sets

@@ -151,26 +151,32 @@ public class QueryActor extends HigglaActor {
             BooleanQuery qTmpl = new BooleanQuery();
             for (Map.Entry<String,Box> entry : tmpl.getMap().entrySet()) {
                 // FIXME: handle nested objects, right now we require a string, see TODO file
-                String field = entry.getKey();
+                FieldSpec field = parseFieldSpec(entry.getKey());
+
                 Box valueBox = entry.getValue();
                 switch (valueBox.getType()) {
                     case INT:
                         long lval = valueBox.getLong();
                         qTmpl.add(NumericRangeQuery.newLongRange(
-                                field, lval, lval, true, true), Occur.MUST);
+                                field.name, lval, lval, true, true), field.occur);
                         break;
                     case FLOAT:
                         double dval = valueBox.getFloat();
                         qTmpl.add(NumericRangeQuery.newDoubleRange(
-                                field, dval, dval, true, true), Occur.MUST);
+                                field.name, dval, dval, true, true), field.occur);
                         break;
                     case BOOLEAN:
                         qTmpl.add(new TermQuery(new Term(
-                                field, valueBox.toString())), Occur.MUST);
+                                field.name, valueBox.toString())), field.occur);
                         break;
                     case STRING:
-                        qTmpl.add(new TermQuery(new Term(
-                                field, valueBox.getString())), Occur.MUST);
+                        if (field.isPrefix) {
+                            qTmpl.add(new PrefixQuery(new Term(
+                               field.name, valueBox.getString())), field.occur);
+                        } else {
+                            qTmpl.add(new TermQuery(new Term(
+                                    field.name, valueBox.getString())), field.occur);
+                        }
                         break;
                     case MAP:
                     case LIST:
@@ -181,5 +187,35 @@ public class QueryActor extends HigglaActor {
         }
 
         return q;
+    }
+
+    private static class FieldSpec {
+        public Occur occur;
+        public String name;
+        public boolean isPrefix;
+        public boolean isNegated;
+    }
+
+    private FieldSpec parseFieldSpec(String field) {
+        FieldSpec spec = new FieldSpec();
+        spec.occur = Occur.MUST;
+        spec.isNegated = field.startsWith("!");
+        spec.isPrefix = field.endsWith("*");
+        // Note: We could use other begin/end chars, like <, >, +, - etc.
+        //       to define range queries etc.
+
+        if (spec.isNegated && spec.isPrefix) {
+            spec.name = field.substring(1, field.length() -1);
+            spec.occur = Occur.MUST_NOT;
+        } else if (spec.isNegated) {
+            spec.name = field.substring(1, field.length());
+            spec.occur = Occur.MUST_NOT;
+        } else if (spec.isPrefix) {
+            spec.name = field.substring(0, field.length() -1);
+        } else {
+            spec.name = field;
+        }
+
+        return spec;
     }
 }
