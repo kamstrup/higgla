@@ -38,6 +38,16 @@ public class Session {
         this.socketAddress = new InetSocketAddress(host, port);
     }
 
+    /**
+     * Prepare a document for storage in Higgla. When you have build the
+     * document you commit it to the storage by calling
+     * {@link #store}.
+     * @param id The id the document should be stored under
+     * @param indexFields A list of fields to create full text indexes for.
+     *                    It is not an error if these fields are not present in
+     *                    the document when stored
+     * @return A box of {@code MAP} type that you can add fields to
+     */
     public Box newDocument(String id, String... indexFields) {
         Box box = Box.newMap();
         box.put("__base__", base);
@@ -54,6 +64,16 @@ public class Session {
         return box;
     }
 
+    /**
+     * Prepare a document for storage in Higgla. When you have build the
+     * document you commit it to the storage by calling
+     * {@link #store}.
+     * @param id The id the document should be stored under
+     * @param indexFields A list of fields to create full text indexes for.
+     *                    It is not an error if these fields are not present in
+     *                    the document when stored
+     * @return A box of {@code MAP} type that you can add fields to
+     */
     public Box newDocument(String id, Iterable<String> indexFields) {
         Box box = newDocument(id);
         Box index = null;
@@ -67,16 +87,41 @@ public class Session {
         return box;
     }
 
+    /**
+     * Prepare a query against the base this session is constructed for.
+     * To submit the query use {@link #sendQuery}
+     * @return a query you should add templates to, and later submit to
+     *         {@link #sendQuery}
+     */
     public Query prepareQuery() {
         return new Query(base);
     }
 
+    /**
+     * Send a prepared query to the storage, retrieving all matching boxes
+     * @param q the query to submit
+     * @return a list of all matching boxes
+     * @throws IOException if there is an error sending the query
+     * @throws HigglaException if there is a server side error processing the
+     *                         query
+     */
     public List<Box> sendQuery(Query q) throws IOException, HigglaException {
         Box rawQuery = q.getRawQuery();
         Box resp = send(HTTP.Method.POST, "/actor/query/", rawQuery);
         return resp.getList("__results__");
     }
 
+    /**
+     * Store one or more boxes in the base this session was created for.
+     * @param boxes the boxes to store
+     * @return A box of {@code MAP} type that contains {@code (id,status)}
+     *         pairs for each box in {@code boxes}. If the status is anything
+     *         other than {@code "ok"} the box with the given id has not been
+     *         stored
+     * @throws IOException if there is an error sending the query
+     * @throws HigglaException if there is a server side error processing the
+     *                         request
+     */
     public Box store(Box... boxes) throws IOException, HigglaException {
         Box envelope = Box.newMap();
         Box list = Box.newList();
@@ -87,6 +132,17 @@ public class Session {
         return send(HTTP.Method.POST, "/actor/store/", envelope);
     }
 
+    /**
+     * Store one or more boxes in the base this session was created for.
+     * @param boxes the boxes to store
+     * @return A box of {@code MAP} type that contains {@code (id,status)}
+     *         pairs for each box in {@code boxes}. If the status is anything
+     *         other than {@code "ok"} the box with the given id has not been
+     *         stored
+     * @throws IOException if there is an error sending the query
+     * @throws HigglaException if there is a server side error processing the
+     *                         request
+     */
     public Box store(Iterable<Box> boxes) throws IOException, HigglaException {
         Box envelope = Box.newMap();
         Box list = Box.newList();
@@ -97,11 +153,32 @@ public class Session {
         return send(HTTP.Method.POST, "/actor/store/", envelope);
     }
 
+    /**
+     * Expert: Send a free form {@link Box} to the Higgla server
+     * @param method the HTTP method to use
+     * @param address the URI part of the HTTP request
+     * @param box the box to send
+     * @return the response from the Higgla server
+     * @throws IOException if there is an error sending the query
+     * @throws HigglaException if there is a server side error processing the
+     *                         request
+     */
     public Box send(HTTP.Method method, String address, Box box)
                                            throws IOException, HigglaException {
         return send(method, address, new JSonBoxReader(box));
     }
 
+    /**
+     * Expert: Send a free form message to the Higgla server
+     * @param method the HTTP method to use
+     * @param address the URI part of the HTTP request
+     * @param msg the data to send. Note that the Higgla server expects JSON
+     *            data as the body of all HTTP requests
+     * @return the response from the Higgla server
+     * @throws IOException if there is an error sending the query
+     * @throws HigglaException if there is a server side error processing the
+     *                         request
+     */
     public Box send(HTTP.Method method, String address, Reader msg)
                                            throws IOException, HigglaException {
         ByteBuffer buf = ByteBuffer.allocate(1024);
@@ -136,7 +213,7 @@ public class Session {
         }
 
         byte[] bbuf = new byte[1024];
-        while ((len = r.readHeaderField(bbuf)) > 0) {
+        while (r.readHeaderField(bbuf) > 0) {
             // Ignore headers
         }
 
