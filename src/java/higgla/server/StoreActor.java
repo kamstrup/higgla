@@ -76,28 +76,31 @@ public class StoreActor extends HigglaActor {
         }
 
         Box response = Box.newMap();
-        for (Box box : list.getList()) {
-            String base = box.getString("__base__");
-            String id = box.getString("__id__");
-            List<String> index;
-            Box _index = box.get("__index__");
-            if (_index != null) {
-                index = new ArrayList<String>(_index.size());
-                for (Box indexField : _index.getList()) {
-                    index.add(indexField.getString());
+        try {
+            for (Box box : list.getList()) {
+                String base = box.getString("__base__");
+                String id = box.getString("__id__");
+                List<String> index;
+                Box _index = box.get("__index__");
+                if (_index != null) {
+                    index = new ArrayList<String>(_index.size());
+                    for (Box indexField : _index.getList()) {
+                        index.add(indexField.getString());
+                    }
+                } else {
+                    index = Collections.EMPTY_LIST;
                 }
-            } else {
-                index = Collections.EMPTY_LIST;
-            }
 
-            try {
-                storeBox(id, base, index, box);
-                response.put(id, "ok");
-            } catch (IOException e) {
-                response.put(id, "error - " + e.getMessage());
-            } finally {
-                send(response, message.getSender());
+                try {
+                    storeBox(id, base, index, box);
+                    response.put(id, "ok");
+                } catch (Exception e) {
+                    response.put(id, "error - " + e.getMessage());
+                }
             }
+        }
+        finally {
+            send(response, message.getSender());
         }
     }
 

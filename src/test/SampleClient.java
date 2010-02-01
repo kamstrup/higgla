@@ -22,7 +22,6 @@ public class SampleClient {
         System.out.println("Stored:");
         System.out.println(response);
 
-
         // Do a query
         Query q = session.prepareQuery();
         q.addTemplate(Box.newMap().put("firstname", "john"));
