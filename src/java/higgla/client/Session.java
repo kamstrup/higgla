@@ -102,8 +102,7 @@ public class Session {
      * @param q the query to submit
      * @return a list of all matching boxes
      * @throws IOException if there is an error sending the query
-     * @throws HigglaException if there is a server side error processing the
-     *                         query
+     * @throws HigglaException if the server returns an error message
      */
     public List<Box> sendQuery(Query q) throws IOException, HigglaException {
         Box rawQuery = q.getRawQuery();
@@ -119,8 +118,7 @@ public class Session {
      *         other than {@code "ok"} the box with the given id has not been
      *         stored
      * @throws IOException if there is an error sending the query
-     * @throws HigglaException if there is a server side error processing the
-     *                         request
+     * @throws HigglaException if the server returns an error message
      */
     public Box store(Box... boxes) throws IOException, HigglaException {
         Box envelope = Box.newMap();
@@ -140,8 +138,7 @@ public class Session {
      *         other than {@code "ok"} the box with the given id has not been
      *         stored
      * @throws IOException if there is an error sending the query
-     * @throws HigglaException if there is a server side error processing the
-     *                         request
+     * @throws HigglaException if the server returns an error message
      */
     public Box store(Iterable<Box> boxes) throws IOException, HigglaException {
         Box envelope = Box.newMap();
@@ -160,8 +157,7 @@ public class Session {
      * @param box the box to send
      * @return the response from the Higgla server
      * @throws IOException if there is an error sending the query
-     * @throws HigglaException if there is a server side error processing the
-     *                         request
+     * @throws HigglaException if the server returns an error message
      */
     public Box send(HTTP.Method method, String address, Box box)
                                            throws IOException, HigglaException {
@@ -176,8 +172,7 @@ public class Session {
      *            data as the body of all HTTP requests
      * @return the response from the Higgla server
      * @throws IOException if there is an error sending the query
-     * @throws HigglaException if there is a server side error processing the
-     *                         request
+     * @throws HigglaException if the server returns an error message
      */
     public Box send(HTTP.Method method, String address, Reader msg)
                                            throws IOException, HigglaException {
@@ -204,7 +199,7 @@ public class Session {
         HTTPResponseReader r = new HTTPResponseReader(channel, buf);
         Version v = r.readVersion();
         if (v == Version.ERROR || v == Version.UNKNOWN) {
-            throw new HigglaException("Bad protocol version version");
+            throw new IOException("Bad protocol version version");
         }
         int status = r.readStatus().httpOrdinal();
         if (status < 200 || status >= 300) {
@@ -218,6 +213,20 @@ public class Session {
         }
 
         BoxParser parser = new JSonBoxParser();
-        return parser.parse(new InputStreamReader(r.streamBody()));
+        Box box = parser.parse(new InputStreamReader(r.streamBody()));
+        checkError(box);
+        return box;
+    }
+
+    /**
+     * Throw a {@link higgla.client.HigglaException} if {@code box} is a
+     * {@code MAP} and contains a field named {@code ""error}.
+     * @param box the box to check for errors
+     * @throws HigglaException if box contains an error field
+     */
+    private void checkError(Box box) throws HigglaException {
+        if (box.getType() == Box.Type.MAP && box.has("error")) {
+            throw new HigglaException(box.getString("error"));
+        }
     }
 }

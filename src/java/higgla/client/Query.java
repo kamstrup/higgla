@@ -4,11 +4,13 @@ import juglr.Box;
 
 /**
  * Convenience representation of a query. Queries are created by calling
- * {@link higgla.client.Session#prepareQuery()}.
+ * {@link higgla.client.Session#prepareQuery()}. When you have prepared a query
+ * you submit it to the Higgla server by calling
+ * {@link Session#sendQuery(Query)}.
  * <p/>
  * Higgla uses a template based query engine. A query consists of a collection
  * of templates and the query will match a document if the document matches any
- * one of templates. Templates are added to the query by calling
+ * one of the templates. Templates are added to the query by calling
  * {@link #addTemplate(juglr.Box)}.
  * <p/>
  * A document matches a template if each field in the template matces a free
