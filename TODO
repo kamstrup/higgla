@@ -3,9 +3,14 @@ TODO for Higgla
 
  * Optimize writing by caching the IndexWriter
  * Optimize querying by caching the index reader+searcher
- * Allow indexing and querying of nested objects by concatenating field names with '#'
+ * Allow indexing and querying of nested objects by concatenating field names
+   with '#', '/', or some other suitable character
  * Implement document versioning
- * StoreActor should accept LISTs of documents instead or one document
+ * Alternative indexing of documents:
+  - Handle numeric fields
+  - Handle boolean fields
+  - Allow verbatim/keyword fields by having a __keys__ list, just like
+    the __index__ list cirrently used
  * Implement a LookupActor that fetches documents for a list of ids
  * Consider if/how we do paging of large result sets
  * Consider if/how to do sorting
