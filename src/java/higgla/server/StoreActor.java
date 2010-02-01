@@ -7,6 +7,8 @@ import org.apache.lucene.document.Document;
 import org.apache.lucene.document.Field;
 import static org.apache.lucene.document.Field.Store;
 import static org.apache.lucene.document.Field.Index;
+
+import org.apache.lucene.document.NumericField;
 import org.apache.lucene.index.IndexWriter;
 import org.apache.lucene.store.Directory;
 import org.apache.lucene.store.FSDirectory;
@@ -122,8 +124,29 @@ public class StoreActor extends HigglaActor {
                  "__body__", reader.asString(), Store.YES, Index.NOT_ANALYZED));
             for (String indexField : index) {
                 Box field = box.get(indexField);
-                doc.add(new Field(
-                       indexField, field.toString(), Store.NO, Index.ANALYZED));
+                switch (field.getType()) {
+                    case INT:
+                        doc.add(
+                            new NumericField(indexField).setLongValue(
+                                                             field.getLong()));
+                        break;
+                    case FLOAT:
+                        doc.add(
+                            new NumericField(indexField).setDoubleValue(
+                                                             field.getFloat()));
+                        break;
+                    case BOOLEAN:
+                        doc.add(new Field(indexField, field.toString(),
+                                          Store.NO, Index.NOT_ANALYZED));
+                        break;
+                    case STRING:
+                        doc.add(new Field(indexField, field.getString(),
+                                          Store.NO, Index.ANALYZED));
+                        break;
+                    case MAP:
+                    case LIST:
+                        throw new UnsupportedOperationException("FIXME");
+                }
             }
             writer.addDocument(doc);
         } finally {

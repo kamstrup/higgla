@@ -91,8 +91,6 @@ public class QueryActor extends HigglaActor {
             return;
         }
 
-        System.out.println("QUERY " + query.toString());
-
         // Execute query, collect __body__ fields, parse them as Boxes,
         // and return to sender
         IndexSearcher searcher = null;
@@ -154,8 +152,30 @@ public class QueryActor extends HigglaActor {
             for (Map.Entry<String,Box> entry : tmpl.getMap().entrySet()) {
                 // FIXME: handle nested objects, right now we require a string, see TODO file
                 String field = entry.getKey();
-                String value = entry.getValue().getString();
-                qTmpl.add(new TermQuery(new Term(field, value)), Occur.MUST);
+                Box valueBox = entry.getValue();
+                switch (valueBox.getType()) {
+                    case INT:
+                        long lval = valueBox.getLong();
+                        qTmpl.add(NumericRangeQuery.newLongRange(
+                                field, lval, lval, true, true), Occur.MUST);
+                        break;
+                    case FLOAT:
+                        double dval = valueBox.getFloat();
+                        qTmpl.add(NumericRangeQuery.newDoubleRange(
+                                field, dval, dval, true, true), Occur.MUST);
+                        break;
+                    case BOOLEAN:
+                        qTmpl.add(new TermQuery(new Term(
+                                field, valueBox.toString())), Occur.MUST);
+                        break;
+                    case STRING:
+                        qTmpl.add(new TermQuery(new Term(
+                                field, valueBox.getString())), Occur.MUST);
+                        break;
+                    case MAP:
+                    case LIST:
+                        throw new UnsupportedOperationException("FIXME");
+                }
             }
             q.add(qTmpl, Occur.SHOULD);
         }
