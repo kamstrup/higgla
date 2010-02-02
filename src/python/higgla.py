@@ -58,8 +58,6 @@ class Session:
         :param msg:
         :returns:
         """
-        if not isinstance(msg, (str,unicode)):
-            msg = json.dumps(msg)
         conn = self._http.create()
         conn.send_request(method, url, {} ,msg)
         headers, body = conn.read_response()
@@ -216,17 +214,18 @@ class HTTPTransactionFactory:
 if __name__ == "__main__":
     session = Session("localhost", 4567, "mybase")
 
-    print "LOOKUP mydoc1 ND mydoc2 RESULTS"
+    print "LOOKUP mydoc1 AND mydoc2 RESULTS"
     print str(session.get(["mydoc1", "mydoc2"]))
-    print ""
-
-    print "QUERY RESULTS"
-    q = session.prepare_query(firstname="john")
-    print str(session.send_query(q))
     print ""
 
     print "STORE RESULTS"
     box = session.prepare_box("mke", "firstname",
-                              firstname="Mikkel", lastname="kamstrup")
+                              firstname="Mikkel", lastname="Kamstrup")
+    box["address"] = "57 Mount Pleasant Street"
     print str(session.store([box]))
+    print ""
+
+    print "QUERY RESULTS"
+    q = session.prepare_query(firstname="mikkel")
+    print str(session.send_query(q))
     print ""
