@@ -3,6 +3,9 @@ TODO for Higgla
 
  * Optimize writing by caching the IndexWriter
  * Optimize querying by caching the index reader+searcher
+ * Pass all string members in query templates through a StandardAnalyzer
+   and join an AND query over the tokens - or possibly simply use a standard
+   Lucene QueryParser on string members
  * Allow indexing and querying of nested objects by concatenating field names
    with '#', '/', or some other suitable character
  * Implement document versioning

@@ -170,6 +170,8 @@ public class QueryActor extends HigglaActor {
                                 field.name, valueBox.toString())), field.occur);
                         break;
                     case STRING:
+                        // FIXME: Run a StandardAnalyzer over the string
+                        //        and join an AND query over the tokens
                         if (field.isPrefix) {
                             qTmpl.add(new PrefixQuery(new Term(
                                field.name, valueBox.getString())), field.occur);
