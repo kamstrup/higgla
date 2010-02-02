@@ -8,7 +8,8 @@ TODO for Higgla
    Lucene QueryParser on string members
  * Allow indexing and querying of nested objects by concatenating field names
    with '#', '/', or some other suitable character
- * Implement document versioning
+ * Implement document versioning, with an eye towards distribution and
+   replication
  * Alternative indexing of documents:
   - Allow verbatim/keyword fields by having a __keys__ list, just like
     the __index__ list currently used
