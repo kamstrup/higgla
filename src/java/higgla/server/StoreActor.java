@@ -190,5 +190,52 @@ public class StoreActor extends HigglaActor {
      */
     protected void releaseWriter(IndexWriter writer) throws IOException {
         writer.close();
-    }    
+    }
+
+    private Document boxToDocument(Box box) {
+        Document doc = new Document();
+        String id = box.getString("__id__");
+        long rev = box.getLong("__rev__");
+        String body = box.get("__body__").toString();
+        List<Box> indexFields;
+        if (box.has("__index__")) {
+            indexFields = box.getList("__index__");
+        } else {
+            indexFields = Collections.EMPTY_LIST;
+        }
+
+        doc.add(new Field(
+                    "__id__", id, Field.Store.YES, Field.Index.NOT_ANALYZED));
+        doc.add(new NumericField(
+                "__rev__", Field.Store.YES, true).setLongValue(rev));
+        doc.add(new Field(
+                "__body__", body, Field.Store.YES, Field.Index.NO));
+        for (Box fieldBox : indexFields) {
+            String field = fieldBox.getString();
+            Box value = box.get(field);
+            switch (value.getType()) {
+                case INT:
+                    doc.add(new NumericField(field).setLongValue(
+                                    value.getLong()));
+                    break;
+                case FLOAT:
+                    doc.add(
+                            new NumericField(field).setDoubleValue(
+                                    value.getFloat()));
+                    break;
+                case BOOLEAN:
+                    doc.add(new Field(field, value.toString(),
+                                     Field.Store.NO, Field.Index.NOT_ANALYZED));
+                    break;
+                case STRING:
+                    doc.add(new Field(field, value.getString(),
+                                      Field.Store.NO, Field.Index.ANALYZED));
+                    break;
+                case MAP:
+                case LIST:
+                    throw new UnsupportedOperationException("FIXME");
+            }
+        }
+        return doc;
+    }
 }
