@@ -58,7 +58,7 @@ public class GetActor extends HigglaActor {
         } catch (MessageFormatException e) {
             send(
                formatMsg("error", "Invalid message format: %s", e.getMessage()),
-               message.getSender());
+               message.getReplyTo());
             return;
         }
 
@@ -71,12 +71,12 @@ public class GetActor extends HigglaActor {
         } catch (MessageFormatException e) {
             send(
                formatMsg("error", "Invalid message format: %s", e.getMessage()),
-               message.getSender());
+               message.getReplyTo());
             return;
         } catch (Box.TypeException e) {
             send(
                formatMsg("error", "Invalid message type: %s", e.getMessage()),
-               message.getSender());
+               message.getReplyTo());
             return;
         }
 
@@ -99,25 +99,25 @@ public class GetActor extends HigglaActor {
                     results.add(resultBox);
                 }
             }
-            send(envelope, message.getSender());
+            send(envelope, message.getReplyTo());
         } catch (IOException e) {
             send(
                formatMsg("error", "Error executing query: %s", e.getMessage()),
-               message.getSender());
+               message.getReplyTo());
         } catch (Throwable t) {
             t.printStackTrace();
             String hint = t.getMessage();
             hint = hint != null ? hint : t.getClass().getSimpleName();
             send(
                   formatMsg("error", "Internal error: %s", hint),
-                  message.getSender());
+                  message.getReplyTo());
         } finally {
             try {
                 releaseSearcher(searcher);
             } catch (IOException e) {
                 send(
                   formatMsg("error", "Error releasing searcher: %s", e.getMessage()),
-                  message.getSender());
+                  message.getReplyTo());
             }
         }
     }
