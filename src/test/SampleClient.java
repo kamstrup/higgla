@@ -15,7 +15,7 @@ public class SampleClient {
         Session session = new Session("localhost", 4567, "mybase");
 
         // Create a a document with the fields firstname and lastname indexed
-        Box d1 = session.newDocument("mydoc1", "firstname", "lastname");
+        Box d1 = session.newDocument("mydoc1", 0, "firstname", "lastname");
         d1.put("firstname", "John");
         d1.put("lastname", "Doe");
         Box response = session.store(d1);

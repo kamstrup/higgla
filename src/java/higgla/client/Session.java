@@ -48,10 +48,10 @@ public class Session {
      *                    the document when stored
      * @return A box of {@code MAP} type that you can add fields to
      */
-    public Box newDocument(String id, String... indexFields) {
+    public Box newDocument(String id, long revision, String... indexFields) {
         Box box = Box.newMap();
-        box.put("__base__", base);
         box.put("__id__", id);
+        box.put("__rev__", revision);
 
         if (indexFields.length > 0) {
             Box index = Box.newList();
@@ -74,8 +74,9 @@ public class Session {
      *                    the document when stored
      * @return A box of {@code MAP} type that you can add fields to
      */
-    public Box newDocument(String id, Iterable<String> indexFields) {
-        Box box = newDocument(id);
+    public Box newDocument(
+                       String id, long revision, Iterable<String> indexFields) {
+        Box box = newDocument(id, revision);
         Box index = null;
         for (String field : indexFields) {
             if (index == null) {
@@ -127,6 +128,7 @@ public class Session {
             list.add(box);
         }
         envelope.put("__store__", list);
+        envelope.put("__base__", base);
         return send(HTTP.Method.POST, "/actor/store/", envelope);
     }
 

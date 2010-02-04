@@ -8,7 +8,6 @@ import org.apache.lucene.index.IndexWriter;
 import java.util.Iterator;
 import java.util.LinkedList;
 import java.util.List;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
@@ -20,22 +19,22 @@ public class Transaction extends Message implements
     private long transactionId;
     private List<Revision> changeList;
 
-    private static AtomicLong transactionIdCounter;
+    private static final AtomicLong transactionIdCounter = new AtomicLong();
 
-    private Transaction(String base) throws TransactionException {
+    public Transaction(String base) {
         this.base = base;
         transactionId = transactionIdCounter.incrementAndGet();
         changeList = new LinkedList<Revision>();
     }
 
     public Transaction add(Box box) throws TransactionException {
-        Revision rev = prepareRevision(box, null, Revision.UPDATE);
+        Revision rev = prepareRevision(box, Revision.UPDATE);
         changeList.add(rev);
         return this;
     }
 
     public Transaction delete(Box box) throws TransactionException {
-        Revision rev = prepareRevision(box, null, Revision.DELETE);
+        Revision rev = prepareRevision(box, Revision.DELETE);
         changeList.add(rev);
         return this;
     }
@@ -52,19 +51,14 @@ public class Transaction extends Message implements
         return changeList.size();
     }
 
-    private Revision prepareRevision(Box box, Document doc, int revType)
+    private Revision prepareRevision(Box box, int revType)
             throws TransactionException {
-        if (!base.equals(box.getString("__base__"))) {
-            throw new TransactionException(String.format(
-                    "Illegal base '%s' for box '%s'. Expected '%s'",
-                    box.getString("__base__"), box.getString("__id__"), base));
-        }
-
         Revision rev = new Revision();
-        rev.doc = doc;
         rev.id = box.getString("__id__");
         rev.rev = box.getLong("__rev__");
+        rev.box = box;
         rev.type = revType;
+        rev.transactionId = transactionId;
 
         return rev;
     }
@@ -91,12 +85,9 @@ public class Transaction extends Message implements
         public static final int DELETE = 2;
 
         public int type;
-        public Document doc;
         public long rev;
         public String id;
-
-        // Used internally by StoreGatewayActor as an optimization
-        public IndexWriter baseWriter;
+        public Box box;
         public long transactionId;
     }
 }

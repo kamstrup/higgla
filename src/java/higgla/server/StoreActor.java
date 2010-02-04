@@ -16,9 +16,7 @@ import org.apache.lucene.util.Version;
 
 import java.io.File;
 import java.io.IOException;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.List;
+import java.util.*;
 
 /**
  * And actor that stores messages in a Lucene index. The stored messages
@@ -38,14 +36,11 @@ import java.util.List;
  */
 public class StoreActor extends HigglaActor {
 
-    private Analyzer analyzer;
-    private BoxReader reader;
+    private Map<String,Address> bases;
 
     public StoreActor() {
-        super("__store__");
-        analyzer = new StandardAnalyzer(
-                            Version.LUCENE_CURRENT, Collections.EMPTY_SET);
-        reader = new JSonBoxReader(Box.newMap());
+        super("__store__", "__base__");
+        bases = new HashMap<String,Address>();
     }
 
     @Override
@@ -56,186 +51,47 @@ public class StoreActor extends HigglaActor {
         } catch (MessageFormatException e) {
             send(
                formatMsg("error", "Invalid message format: %s", e.getMessage()),
-               message.getSender());
+               message.getReplyTo());
             return;
         }
 
         Box list = envelope.get("__store__");
-        if (list == null) {
-            send(formatMsg("error", "Nothing to store"),
-                 message.getSender());
-            return;
-        }
+        String base = envelope.getString("__base__");
 
         if (list.getType() != Box.Type.LIST) {
             send(
                 formatMsg("error",
                     "__store__ field must be a list, found %s", list.getType()),
-                 message.getSender());
+                 message.getReplyTo());
             return;
         }
 
-        Box response = Box.newMap();
+        Transaction transaction = new Transaction(base);
+        transaction.setReplyTo(message.getReplyTo());
         try {
             for (Box box : list.getList()) {
-                String base = box.getString("__base__");
-                String id = box.getString("__id__");
-                List<String> index;
-                Box _index = box.get("__index__");
-                if (_index != null) {
-                    index = new ArrayList<String>(_index.size());
-                    for (Box indexField : _index.getList()) {
-                        index.add(indexField.getString());
-                    }
+                if (box.has("__delete__")) {
+                    transaction.delete(box);
                 } else {
-                    index = Collections.EMPTY_LIST;
-                }
-
-                try {
-                    storeBox(id, base, index, box);
-                    response.put(id, "ok");
-                } catch (Exception e) {
-                    response.put(id, "error - " + e.getMessage());
+                    transaction.add(box);
                 }
             }
+        } catch (TransactionException e) {
+            send(formatMsg("error", e.getMessage()), message.getReplyTo());
         }
-        finally {
-            send(response, message.getSender());
-        }
+        sendToBase(transaction, base);
     }
 
-    /**
-     * Commit the message {@code box} to the store in {@code base} with the
-     * id {@code id} indexing the fields named in {@code index}
-     * @param id the id to store the message under
-     * @param base the base in which to store the message
-     * @param index a list of field names to index
-     * @param box the message to store
-     * @throws IOException if there is an error writing to the store
-     */
-    protected void storeBox(
-                      String id, String base, List<String> index, Box box)
-                                                            throws IOException {
-        File indexDir = new File(base);
-        IndexWriter writer = takeWriter(indexDir);
-
-        try {
-            reader.reset(box);
-            Document doc = new Document();
-            doc.add(new Field("__id__", id, Store.YES, Index.NOT_ANALYZED));
-            doc.add(new Field(
-                 "__body__", reader.asString(), Store.YES, Index.NOT_ANALYZED));
-            for (String indexField : index) {
-                Box field = box.get(indexField);
-                switch (field.getType()) {
-                    case INT:
-                        doc.add(
-                            new NumericField(indexField).setLongValue(
-                                                             field.getLong()));
-                        break;
-                    case FLOAT:
-                        doc.add(
-                            new NumericField(indexField).setDoubleValue(
-                                                             field.getFloat()));
-                        break;
-                    case BOOLEAN:
-                        doc.add(new Field(indexField, field.toString(),
-                                          Store.NO, Index.NOT_ANALYZED));
-                        break;
-                    case STRING:
-                        doc.add(new Field(indexField, field.getString(),
-                                          Store.NO, Index.ANALYZED));
-                        break;
-                    case MAP:
-                    case LIST:
-                        throw new UnsupportedOperationException("FIXME");
-                }
+    private void sendToBase(Transaction transaction, String base) {
+        Address baseAddress = bases.get(base);
+        if (baseAddress == null) {
+            baseAddress = getBus().lookup("__base__"+base);
+            if (baseAddress == null) {
+                baseAddress = new BaseActor(base).getAddress();
+                getBus().start(baseAddress);
             }
-            writer.addDocument(doc);
-        } finally {
-            releaseWriter(writer);
+            bases.put(base, baseAddress);
         }
-    }
-
-    /**
-     * Grab a reference to a writer that is ready for writing to
-     * {@code indexDir}. When done with the writer you <i>must</i> call
-     * {@link #releaseWriter}
-     * @param indexDir the directory to store the index in
-     * @return a new or pooled writer instance
-     * @throws IOException if there is an error creating the writer
-     */
-    protected IndexWriter takeWriter(File indexDir) throws IOException {
-        Directory dir = FSDirectory.open(indexDir);
-        if (indexDir.exists()) {
-            if (!new File(indexDir, "segments.gen").exists()) {
-                // Create a new empty index
-                new IndexWriter(dir, analyzer, true,
-                                IndexWriter.MaxFieldLength.LIMITED).close();
-            }
-        } else {
-            // Create a new empty index
-            new IndexWriter(dir, analyzer, true,
-                            IndexWriter.MaxFieldLength.LIMITED).close();
-        }
-        return new IndexWriter(dir, analyzer,
-                               false, IndexWriter.MaxFieldLength.LIMITED);
-    }
-
-    /**
-     * Release a writer obtained by calling {@link #takeWriter} and commit
-     * any transactions it might have pending
-     * @param writer the writer to release
-     * @throws IOException
-     */
-    protected void releaseWriter(IndexWriter writer) throws IOException {
-        writer.close();
-    }
-
-    private Document boxToDocument(Box box) {
-        Document doc = new Document();
-        String id = box.getString("__id__");
-        long rev = box.getLong("__rev__");
-        String body = box.get("__body__").toString();
-        List<Box> indexFields;
-        if (box.has("__index__")) {
-            indexFields = box.getList("__index__");
-        } else {
-            indexFields = Collections.EMPTY_LIST;
-        }
-
-        doc.add(new Field(
-                    "__id__", id, Field.Store.YES, Field.Index.NOT_ANALYZED));
-        doc.add(new NumericField(
-                "__rev__", Field.Store.YES, true).setLongValue(rev));
-        doc.add(new Field(
-                "__body__", body, Field.Store.YES, Field.Index.NO));
-        for (Box fieldBox : indexFields) {
-            String field = fieldBox.getString();
-            Box value = box.get(field);
-            switch (value.getType()) {
-                case INT:
-                    doc.add(new NumericField(field).setLongValue(
-                                    value.getLong()));
-                    break;
-                case FLOAT:
-                    doc.add(
-                            new NumericField(field).setDoubleValue(
-                                    value.getFloat()));
-                    break;
-                case BOOLEAN:
-                    doc.add(new Field(field, value.toString(),
-                                     Field.Store.NO, Field.Index.NOT_ANALYZED));
-                    break;
-                case STRING:
-                    doc.add(new Field(field, value.getString(),
-                                      Field.Store.NO, Field.Index.ANALYZED));
-                    break;
-                case MAP:
-                case LIST:
-                    throw new UnsupportedOperationException("FIXME");
-            }
-        }
-        return doc;
+        send(transaction, baseAddress);
     }
 }
