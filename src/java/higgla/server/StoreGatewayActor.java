@@ -10,9 +10,7 @@ import org.apache.lucene.util.Version;
 
 import java.io.File;
 import java.io.IOException;
-import java.util.Collections;
-import java.util.PriorityQueue;
-import java.util.Queue;
+import java.util.*;
 
 /**
  * Responsible for commiting Transactions
@@ -27,7 +25,6 @@ public class StoreGatewayActor extends Actor {
     private Transaction actualTransaction;
     private IndexWriter actualWriter;
     private Address writer;
-
 
     public StoreGatewayActor() {
         todo = new PriorityQueue<Transaction>();
@@ -153,6 +150,26 @@ public class StoreGatewayActor extends Actor {
     private static class Check extends Message {
         public long transactionId;
         public String errorMsg;
+    }
+
+    private static class Base {
+        public IndexWriter indexWriter;
+        public Transaction actualTransaction;
+        public int actualTransactionLatch;
+        public Queue<Transaction> todo;
+        public String name;
+
+        public Base(String name) throws IOException {
+            indexWriter = new IndexWriter(FSDirectory.open(new File(name)),
+                                          new StandardAnalyzer(
+                                                  Version.LUCENE_CURRENT,
+                                                  Collections.EMPTY_SET),
+                                          IndexWriter.MaxFieldLength.LIMITED);
+            actualTransaction = null;
+            actualTransactionLatch = 0;
+            todo = new PriorityQueue<Transaction>();
+            this.name = name;            
+        }
     }
 
     private static class WriterActor extends Actor {
