@@ -16,6 +16,7 @@ import org.apache.lucene.util.Version;
 import java.io.File;
 import java.io.IOException;
 import java.util.*;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * Responsible for handling {@link Transaction}s for a particular base. There
@@ -35,6 +36,7 @@ public class BaseActor extends Actor {
     private Address baseAddress;
     private String baseName;
     private boolean started;
+    private AtomicLong revisionCounter;
 
     public BaseActor(String baseName) {
         this.baseName = baseName;
@@ -55,8 +57,17 @@ public class BaseActor extends Actor {
         }
 
         // We can now assume that we are the unique owner
-        // of the name "__base__${baseName}"
+        // of the name "__base__${baseName}". Thus it should be safe to create
+        // an IndexWriter for the base
         renewWriter();
+
+        try {
+            revisionCounter = new AtomicLong(findLastRevision());
+        } catch (IOException e) {
+            e.printStackTrace();
+            System.err.println("I/O Error detecting last revision number");
+            shutdown();
+        }
     }
 
     /**
@@ -170,8 +181,27 @@ public class BaseActor extends Actor {
                        "Failed to create base '%s'", baseName));
         }
 
-        writer = new WriterActor(indexWriter).getAddress();
+        writer = new WriterActor(indexWriter, revisionCounter).getAddress();
         scheduleNextTransaction();
+    }
+
+    private long findLastRevision() throws IOException {
+        IndexReader r = indexWriter.getReader();
+        System.err.println(
+               "FIXME: HBD! We always assume revision numbers begins maxDoc()");
+        // There is a tricky error here!
+        // We must store the revision number outside of the Lucene index
+        // in order to fix the following scenario:
+        // 1) Add 5 docs, revnum is 5
+        // 2) Remote sync service syncs up to rev 5
+        // 3) Del 3 docs, revnum is now 8
+        // 4) Close Higgla
+        // 5) Start Higgla
+        // 6) Higgla assumes lastRev is 2=5-3
+        // 7) Add brand new doc, revnum now 3
+        // 8) Remote sync service ask for revisions since revnum 5
+        // 9) FAIL!
+        return r.maxDoc();
     }
 
     private void handleTransaction(Transaction transaction) {
@@ -229,9 +259,11 @@ public class BaseActor extends Actor {
         private final Check check = new Check();
         private IndexWriter indexWriter;
         private BoxReader boxReader;
+        private AtomicLong revisionCounter;
 
-        public WriterActor(IndexWriter indexWriter) {
+        public WriterActor(IndexWriter indexWriter, AtomicLong revisionCounter){
             this.indexWriter = indexWriter;
+            this.revisionCounter = revisionCounter;
             boxReader = new JSonBoxReader(new Box(true));
         }
 
@@ -251,7 +283,8 @@ public class BaseActor extends Actor {
                 // If revision is specified correctly, then update it,
                 // otherwise send back an error
                 if (revno == rev.rev) {
-                    Document doc = boxToDocument(rev.box, revno+1);
+                    Document doc = boxToDocument(
+                                    rev.box, revisionCounter.incrementAndGet());
                     if (revno > 0) {
                         // Update an exisiting document
                         if (rev.type == Transaction.Revision.UPDATE) {
