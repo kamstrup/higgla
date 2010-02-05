@@ -14,7 +14,11 @@ import org.apache.lucene.store.FSDirectory;
 import org.apache.lucene.util.Version;
 
 import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
 import java.io.IOException;
+import java.nio.ByteBuffer;
+import java.nio.channels.FileChannel;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -26,6 +30,15 @@ import java.util.concurrent.atomic.AtomicLong;
  * @since Feb 3, 2010
  */
 public class BaseActor extends Actor {
+
+    /** The higgla.meta file must always be exactly 2048 bytes in order
+     * to guard against disk-full scenarios.
+     * We also reserve a byte array of that size in memory to provide
+     * durability against OOM. */
+    private static final int META_SIZE = 2048;
+    private static final int HIGGLA_META_VERSION = 1;
+    private ByteBuffer metaBuffer;
+    private File metaFile;
 
     private Queue<Transaction> todo;
     private int actualTransactionLatch;
@@ -42,6 +55,10 @@ public class BaseActor extends Actor {
         this.baseName = baseName;
         todo = new PriorityQueue<Transaction>();
         actualTransactionErrors = new LinkedList<Box>();
+
+        // Pre-allocate resources for the higgla.meta file
+        metaBuffer = ByteBuffer.allocate(META_SIZE);
+        metaFile = new File(baseName, "higgla.meta");
     }
 
     @Override
@@ -59,15 +76,16 @@ public class BaseActor extends Actor {
         // We can now assume that we are the unique owner
         // of the name "__base__${baseName}". Thus it should be safe to create
         // an IndexWriter for the base
-        renewWriter();
 
         try {
-            revisionCounter = new AtomicLong(findLastRevision());
+            revisionCounter = new AtomicLong(readLastRevision());
         } catch (IOException e) {
             e.printStackTrace();
             System.err.println("I/O Error detecting last revision number");
             shutdown();
         }
+
+        renewWriter();  // requires revisionCounter to be set
     }
 
     /**
@@ -127,6 +145,7 @@ public class BaseActor extends Actor {
 
             try {
                 indexWriter.commit();
+                commitMeta();
                 Box reply = formatMsg(
                                 Long.toString(actualTransaction.getId()), "ok");
                 reply.put("transaction", actualTransaction.getId());
@@ -155,6 +174,8 @@ public class BaseActor extends Actor {
     }
 
     private void renewWriter() {
+        assert revisionCounter != null;
+
         if (writer != null) {
             send(WriterActor.SHUTDOWN, writer);
         }
@@ -185,23 +206,57 @@ public class BaseActor extends Actor {
         scheduleNextTransaction();
     }
 
-    private long findLastRevision() throws IOException {
-        IndexReader r = indexWriter.getReader();
-        System.err.println(
-               "FIXME: HBD! We always assume revision numbers begins maxDoc()");
-        // There is a tricky error here!
-        // We must store the revision number outside of the Lucene index
-        // in order to fix the following scenario:
-        // 1) Add 5 docs, revnum is 5
-        // 2) Remote sync service syncs up to rev 5
-        // 3) Del 3 docs, revnum is now 8
-        // 4) Close Higgla
-        // 5) Start Higgla
-        // 6) Higgla assumes lastRev is 2=5-3
-        // 7) Add brand new doc, revnum now 3
-        // 8) Remote sync service ask for revisions since revnum 5
-        // 9) FAIL!
-        return r.maxDoc();
+    /**
+     * Write index metadata to the file higgla.meta - most notably our
+     * revision number.
+     * <p/>
+     * The higgla.meta file keeps it's file format version in an integer
+     * in the first 4 bytes. The higgla.meta format version 1 simply
+     * stores the last known revision number as a long in the next 8 bytes
+     * @throws IOException bad bad bad
+     */
+    private void commitMeta() throws IOException {
+        metaBuffer.clear();
+        metaBuffer.putInt(HIGGLA_META_VERSION);
+        metaBuffer.putLong(revisionCounter.get());
+
+        // Pad the file to META_SIZE
+        while (metaBuffer.remaining() > 0) {
+            metaBuffer.putInt(0);
+        }
+        metaBuffer.flip();
+
+        FileChannel f = new FileOutputStream(metaFile).getChannel();
+        try {
+            f.write(metaBuffer);
+        } finally {
+            f.close();
+        }
+    }
+
+    /**
+     * Read the last known revision from the higgla.meta file or return 0
+     * if the file doesn't exist
+     * @return
+     * @throws IOException
+     */
+    private long readLastRevision() throws IOException {
+        if (!metaFile.exists()) {
+            return 0;
+        }
+
+        metaBuffer.clear();
+        FileChannel f = new FileInputStream(metaFile).getChannel();
+        f.read(metaBuffer);
+        metaBuffer.flip();
+
+        int metaFileVersion = metaBuffer.getInt();
+        if (metaFileVersion != HIGGLA_META_VERSION) {
+            throw new IOException(
+                    "Unsupported version number found in "+metaFile);
+        }
+        long lastRev = metaBuffer.getLong();
+        return lastRev;
     }
 
     private void handleTransaction(Transaction transaction) {
@@ -260,11 +315,13 @@ public class BaseActor extends Actor {
         private IndexWriter indexWriter;
         private BoxReader boxReader;
         private AtomicLong revisionCounter;
+        private Box internalError; // Returned on uncaught internal errors
 
         public WriterActor(IndexWriter indexWriter, AtomicLong revisionCounter){
             this.indexWriter = indexWriter;
             this.revisionCounter = revisionCounter;
             boxReader = new JSonBoxReader(new Box(true));
+            internalError = Box.newMap().put("error", "Internal error");
         }
 
         @Override
@@ -276,6 +333,8 @@ public class BaseActor extends Actor {
 
             assert message instanceof Transaction.Revision;
             Transaction.Revision rev = (Transaction.Revision)message;
+            check.transactionId = rev.transactionId;
+            check.error = internalError.put("__id__", rev.id);
             Term idTerm = new Term("__id__", rev.id);
             try {
                 long revno = findRevisionNumber(idTerm);
@@ -297,21 +356,19 @@ public class BaseActor extends Actor {
                         // This is a new document
                         indexWriter.addDocument(doc);
                     }
-                    check.transactionId = rev.transactionId;
                     check.error = null;
                 } else {
-                    check.transactionId = rev.transactionId;
                     check.error = Box.newMap()
                                          .put("__id__", rev.id)
                                          .put("__rev__", revno)
                                          .put("error", "conflict");
                 }
-                send(check, rev.getReplyTo());
             } catch (IOException e) {
                 check.transactionId = rev.transactionId;
                 check.error = Box.newMap()
                                      .put("__id__", rev.id)
                                      .put("error", e.getMessage());
+            } finally {
                 send(check, rev.getReplyTo());
             }
         }

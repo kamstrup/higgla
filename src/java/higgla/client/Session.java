@@ -228,7 +228,7 @@ public class Session {
      */
     private void checkError(Box box) throws HigglaException {
         if (box.getType() == Box.Type.MAP && box.has("error")) {
-            throw new HigglaException(box.getString("error"));
+            throw new HigglaException(box.get("error").toString());
         }
     }
 }
