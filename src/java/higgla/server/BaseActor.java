@@ -4,9 +4,12 @@ import juglr.*;
 import org.apache.lucene.analysis.standard.StandardAnalyzer;
 import org.apache.lucene.document.Document;
 import org.apache.lucene.document.Field;
+import org.apache.lucene.document.Fieldable;
 import org.apache.lucene.document.NumericField;
+import org.apache.lucene.index.IndexReader;
 import org.apache.lucene.index.IndexWriter;
 import org.apache.lucene.index.Term;
+import org.apache.lucene.index.TermDocs;
 import org.apache.lucene.store.FSDirectory;
 import org.apache.lucene.util.Version;
 
@@ -26,6 +29,7 @@ public class BaseActor extends Actor {
     private Queue<Transaction> todo;
     private int actualTransactionLatch;
     private Transaction actualTransaction;
+    private List<Box> actualTransactionErrors;
     private IndexWriter indexWriter;
     private Address writer;
     private Address baseAddress;
@@ -35,6 +39,7 @@ public class BaseActor extends Actor {
     public BaseActor(String baseName) {
         this.baseName = baseName;
         todo = new PriorityQueue<Transaction>();
+        actualTransactionErrors = new LinkedList<Box>();
     }
 
     @Override
@@ -50,23 +55,8 @@ public class BaseActor extends Actor {
         }
 
         // We can now assume that we are the unique owner
-        // of the name "__base_${baseName}"
-        try {
-            indexWriter = new IndexWriter(FSDirectory.open(new File(baseName)),
-                                          new StandardAnalyzer(
-                                                  Version.LUCENE_CURRENT,
-                                                  Collections.EMPTY_SET),
-                                          IndexWriter.MaxFieldLength.LIMITED);
-        } catch (IOException e) {
-            // Failed to open the index. Retract this actor from the bus
-            shutdown();
-            e.printStackTrace();
-            System.err.println(String.format(
-                       "Failed to create base '%s'", baseName));
-        }
-        
-        writer = new WriterActor(indexWriter).getAddress();
-        scheduleNextTransaction();
+        // of the name "__base__${baseName}"
+        renewWriter();
     }
 
     /**
@@ -91,7 +81,39 @@ public class BaseActor extends Actor {
         assert check.transactionId == actualTransaction.getId();
         actualTransactionLatch--;
 
+        if (check.error != null) {
+            actualTransactionErrors.add(check.error);
+        }
+
         if (actualTransactionLatch == 0) {
+            if (actualTransactionErrors.size() != 0) {
+                try {
+                    indexWriter.rollback();
+                    renewWriter();
+                } catch (IOException e) {
+                    e.printStackTrace();
+                    System.err.println(String.format(
+                         "I/O Error while rolling back transaction '%s': %s",
+                         actualTransaction.getId(), e.getMessage()));
+                    return;
+                } finally {
+                    Box reply = formatMsg(
+                            Long.toString(actualTransaction.getId()), "error");
+                    reply.put("transaction", actualTransaction.getId());
+                    reply.put("error", actualTransactionErrors);
+                    send(reply, actualTransaction.getReplyTo());
+
+                    // Reset and prepare for next transaction. Note that we can
+                    // not run actualTransactionErrors.clear() since this list
+                    // is now owned by the reply message. Instead we create a
+                    // new list
+                    actualTransaction = null;
+                    actualTransactionErrors = new LinkedList<Box>();
+                    renewWriter();
+                    return;
+                }
+            }
+
             try {
                 indexWriter.commit();
                 Box reply = formatMsg(
@@ -121,6 +143,37 @@ public class BaseActor extends Actor {
         }
     }
 
+    private void renewWriter() {
+        if (writer != null) {
+            send(WriterActor.SHUTDOWN, writer);
+        }
+        if (indexWriter != null) {
+            try {
+                indexWriter.close();
+            } catch (IOException e) {
+                e.printStackTrace();
+                System.err.println("I/O Error renewing index writer");
+            }
+        }
+
+        try {
+            indexWriter = new IndexWriter(FSDirectory.open(new File(baseName)),
+                                          new StandardAnalyzer(
+                                                  Version.LUCENE_CURRENT,
+                                                  Collections.EMPTY_SET),
+                                          IndexWriter.MaxFieldLength.LIMITED);
+        } catch (IOException e) {
+            // Failed to open the index. Retract this actor from the bus
+            shutdown();
+            e.printStackTrace();
+            System.err.println(String.format(
+                       "Failed to create base '%s'", baseName));
+        }
+
+        writer = new WriterActor(indexWriter).getAddress();
+        scheduleNextTransaction();
+    }
+
     private void handleTransaction(Transaction transaction) {
         todo.add(transaction);
 
@@ -146,6 +199,7 @@ public class BaseActor extends Actor {
     private void scheduleNextTransaction() {
         assert actualTransaction == null;
         assert actualTransactionLatch == 0;
+        assert actualTransactionErrors.size() == 0;
 
         Transaction t = todo.poll();
         if (t != null) {
@@ -167,7 +221,7 @@ public class BaseActor extends Actor {
 
     private static class Check extends Message {
         public long transactionId;
-        public String errorMsg; // If set this Check indicates an error
+        public Box error; // If set this Check indicates an error
     }
 
     private static class WriterActor extends Actor {
@@ -190,28 +244,72 @@ public class BaseActor extends Actor {
 
             assert message instanceof Transaction.Revision;
             Transaction.Revision rev = (Transaction.Revision)message;
+            Term idTerm = new Term("__id__", rev.id);
             try {
-                if (rev.type == Transaction.Revision.UPDATE) {
-                    // FIXME: Check existence and revision
-                    Document doc = boxToDocument(rev.box);
-                    indexWriter.addDocument(doc);
-                } else if (rev.type == Transaction.Revision.DELETE){
-                    indexWriter.deleteDocuments(new Term("__id__", rev.id));
+                long revno = findRevisionNumber(idTerm);
+
+                // If revision is specified correctly, then update it,
+                // otherwise send back an error
+                if (revno == rev.rev) {
+                    Document doc = boxToDocument(rev.box, revno+1);
+                    if (revno > 0) {
+                        // Update an exisiting document
+                        if (rev.type == Transaction.Revision.UPDATE) {
+                            indexWriter.deleteDocuments(idTerm);
+                            indexWriter.addDocument(doc);
+                        } else if (rev.type == Transaction.Revision.DELETE){
+                            indexWriter.deleteDocuments(idTerm);
+                        }
+                    } else {
+                        // This is a new document
+                        indexWriter.addDocument(doc);
+                    }
+                    check.transactionId = rev.transactionId;
+                    check.error = null;
+                } else {
+                    check.transactionId = rev.transactionId;
+                    check.error = Box.newMap()
+                                         .put("__id__", rev.id)
+                                         .put("__rev__", revno)
+                                         .put("error", "conflict");
                 }
-                check.transactionId = rev.transactionId;
-                check.errorMsg = null;
                 send(check, rev.getReplyTo());
             } catch (IOException e) {
                 check.transactionId = rev.transactionId;
-                check.errorMsg = e.getMessage();
+                check.error = Box.newMap()
+                                     .put("__id__", rev.id)
+                                     .put("error", e.getMessage());
                 send(check, rev.getReplyTo());
             }
         }
 
-        private Document boxToDocument(Box box) {
+        private long findRevisionNumber(Term idTerm) throws IOException {
+            IndexReader r = indexWriter.getReader();
+            TermDocs docs = r.termDocs(idTerm);
+
+            if (!docs.next()) {
+                return 0;
+            }
+
+            long revno;
+            Document doc = r.document(docs.doc());
+            Fieldable f = doc.getFieldable("__rev__");
+            if (f instanceof NumericField) {
+                revno = ((NumericField)f).getNumericValue().longValue();
+            } else {
+                revno = Long.parseLong(f.stringValue());
+            }
+
+            if (docs.next()) {
+                System.err.println(String.format(
+                  "INTERNAL ERROR: Duplicate entries for '%s'", idTerm.text()));
+            }
+            return revno;
+        }
+
+        private Document boxToDocument(Box box, long rev) {
             Document doc = new Document();
             String id = box.getString("__id__");
-            long rev = box.getLong("__rev__");
             String body = boxReader.reset(box).asString();
 
             // Add stored fields

@@ -78,6 +78,13 @@ public class StoreActor extends HigglaActor {
             }
         } catch (TransactionException e) {
             send(formatMsg("error", e.getMessage()), message.getReplyTo());
+            return;
+        } catch (Box.TypeException e) {
+            send(formatMsg("error", e.getMessage()), message.getReplyTo());
+            return;
+        } catch (MessageFormatException e) {
+            send(formatMsg("error", e.getMessage()), message.getReplyTo());
+            return;
         }
         sendToBase(transaction, base);
     }

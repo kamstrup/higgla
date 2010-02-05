@@ -17,10 +17,14 @@ class Session:
         self._http = HTTPTransactionFactory(
                            hostname=host, port=port, body_parser=json.load)
 
-    def prepare_box(self, id, *index, **kwargs):
+    def prepare_box(self, id, revision, *index, **kwargs):
+        if not isinstance(id, (str,unicode)) :
+            raise TypeError("Box id must be string or unicode, found %s" % type(id))
+        if not isinstance(revision, (int,long)):
+            raise TypeError("Box revision must be int or long, found %s" % type(revision))
         box = {}
-        box["__base__"] = self._base
         box["__id__"] = id
+        box["__rev__"] = revision
         box["__index__"] = index
         box.update(kwargs)
         return box
@@ -45,8 +49,8 @@ class Session:
     def store(self, boxes):
         if not isinstance(boxes, list):
             raise TypeError(
-                       "Expected list, found %s" % type(dict))
-        msg = {"__store__" : boxes}
+                       "Expected list, found %s" % type(boxes))
+        msg = {"__store__" : boxes, "__base__" : self._base}
         return self.send("POST", "/actor/store/", msg)
 
     def send(self, method, url, msg):
@@ -219,7 +223,7 @@ if __name__ == "__main__":
     print ""
 
     print "STORE RESULTS"
-    box = session.prepare_box("mke", "firstname",
+    box = session.prepare_box("mke", 0, "firstname",
                               firstname="Mikkel", lastname="Kamstrup")
     box["address"] = "57 Mount Pleasant Street"
     print str(session.store([box]))
