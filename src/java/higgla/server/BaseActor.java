@@ -10,6 +10,7 @@ import org.apache.lucene.index.IndexReader;
 import org.apache.lucene.index.IndexWriter;
 import org.apache.lucene.index.Term;
 import org.apache.lucene.index.TermDocs;
+import org.apache.lucene.store.Directory;
 import org.apache.lucene.store.FSDirectory;
 import org.apache.lucene.util.Version;
 
@@ -48,10 +49,11 @@ public class BaseActor extends Actor {
     private Address writer;
     private Address baseAddress;
     private String baseName;
+    private Directory baseDir;
     private boolean started;
     private AtomicLong revisionCounter;
 
-    public BaseActor(String baseName) {
+    public BaseActor(String baseName) {        
         this.baseName = baseName;
         todo = new PriorityQueue<Transaction>();
         actualTransactionErrors = new LinkedList<Box>();
@@ -71,6 +73,15 @@ public class BaseActor extends Actor {
             // is already responsible for this base so we silently retract
             // this actor from the bus
             getBus().freeAddress(getAddress());
+            return;
+        }
+        try {
+            baseDir = FSDirectory.open(new File(baseName));
+        } catch (IOException e) {
+            e.printStackTrace();
+            System.err.println("I/O Error opening base directory");
+            shutdown();
+            return;
         }
 
         // We can now assume that we are the unique owner
@@ -83,6 +94,7 @@ public class BaseActor extends Actor {
             e.printStackTrace();
             System.err.println("I/O Error detecting last revision number");
             shutdown();
+            return;
         }
 
         renewWriter();  // requires revisionCounter to be set
@@ -189,7 +201,7 @@ public class BaseActor extends Actor {
         }
 
         try {
-            indexWriter = new IndexWriter(FSDirectory.open(new File(baseName)),
+            indexWriter = new IndexWriter(baseDir,
                                           new StandardAnalyzer(
                                                   Version.LUCENE_CURRENT,
                                                   Collections.EMPTY_SET),
