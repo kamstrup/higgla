@@ -420,6 +420,12 @@ public class BaseActor extends Actor {
             for (Box fieldBox : indexFields) {
                 String field = fieldBox.getString();
                 Box value = box.get(field);
+
+                /* Fields marked for indexing are not necessarily */
+                if (value == null) {
+                    continue;
+                }
+
                 switch (value.getType()) {
                     case INT:
                         doc.add(new NumericField(field).setLongValue(
