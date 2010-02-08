@@ -91,10 +91,10 @@ public class StoreActor extends HigglaActor {
         // actor detaches from the bus on critical errors. Since we
         // create the actor in case it's not found this means that
         // we will dynamically recreate the base actor if it dies
-        Address baseAddress = getBus().lookup("__base__"+base);
+        Address baseAddress = getBus().lookup("/__base__"+base);
         if (baseAddress == null) {
             baseAddress = new BaseActor(base).getAddress();
-                getBus().start(baseAddress);            
+            getBus().start(baseAddress);
         }
         send(transaction, baseAddress);
     }
