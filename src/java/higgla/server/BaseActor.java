@@ -46,6 +46,7 @@ public class BaseActor extends Actor {
     private Transaction actualTransaction;
     private List<Box> actualTransactionErrors;
     private IndexWriter indexWriter;
+    private IndexReader indexReader;
     private Address writer;
     private Address baseAddress;
     private String baseName;
@@ -155,12 +156,17 @@ public class BaseActor extends Actor {
             }
 
             try {
+                // Commit and notify
                 indexWriter.commit();
                 commitMeta();
                 Box reply = formatMsg(
                                 Long.toString(actualTransaction.getId()), "ok");
                 reply.put("transaction", actualTransaction.getId());
                 send(reply, actualTransaction.getReplyTo());
+
+                // Reply has been send; now reload the reader
+                renewReader();
+
                 actualTransaction = null;
                 scheduleNextTransaction();
             } catch (IOException e) {
@@ -184,6 +190,15 @@ public class BaseActor extends Actor {
         }
     }
 
+    private void renewReader() throws IOException {
+        IndexReader newIndexReader = indexReader.reopen();
+        if (newIndexReader != indexReader) {
+            // Reader was reopened
+            indexReader.close();
+            indexReader = newIndexReader;
+        }
+    }
+
     private void renewWriter() {
         assert revisionCounter != null;
 
@@ -198,6 +213,15 @@ public class BaseActor extends Actor {
                 System.err.println("I/O Error renewing index writer");
             }
         }
+        if (indexReader != null) {
+            try {
+                indexReader.close();
+            } catch (IOException e) {
+                e.printStackTrace();
+                System.err.println("I/O Error renewing index writer");
+            }
+        }
+
 
         try {
             indexWriter = new IndexWriter(baseDir,
@@ -205,6 +229,7 @@ public class BaseActor extends Actor {
                                                   Version.LUCENE_CURRENT,
                                                   Collections.EMPTY_SET),
                                           IndexWriter.MaxFieldLength.LIMITED);
+            indexReader = IndexReader.open(baseDir, true);
         } catch (IOException e) {
             // Failed to open the index. Retract this actor from the bus
             shutdown();
@@ -213,7 +238,8 @@ public class BaseActor extends Actor {
                        "Failed to create base '%s'", baseName));
         }
 
-        writer = new WriterActor(indexWriter, revisionCounter).getAddress();
+        writer = new WriterActor(
+                     indexWriter, indexReader, revisionCounter).getAddress();
         scheduleNextTransaction();
     }
 
@@ -285,6 +311,7 @@ public class BaseActor extends Actor {
         getBus().freeAddress(getAddress());
         try {
             indexWriter.close();
+            indexReader.close();
         } catch (IOException e) {
             e.printStackTrace();
             System.err.println(String.format(
@@ -301,6 +328,22 @@ public class BaseActor extends Actor {
         if (t != null) {
             actualTransactionLatch = t.size();
             actualTransaction = t;
+            try {
+                renewReader();
+            } catch (IOException e) {
+                // Print error, put transaction back in queue, and shutdown.
+                // Next time a transaction is send our way the StoreActor
+                // will re-create a BaseActor instance
+                e.printStackTrace();
+                System.err.println("I/O error reopening index reader");
+                shutdown();
+            }
+
+            // We create a new writeractor for each transaction
+            send(WriterActor.SHUTDOWN, writer);
+            writer = new WriterActor(
+                        indexWriter, indexReader, revisionCounter).getAddress();
+
             for (Transaction.Revision rev : actualTransaction) {
                 send(rev, writer);
             }
@@ -322,17 +365,18 @@ public class BaseActor extends Actor {
 
     private static class WriterActor extends Actor {
         public static final Message SHUTDOWN = new Message();
-        private final Check check = new Check();
         private IndexWriter indexWriter;
+        private IndexReader indexReader;
         private BoxReader boxReader;
         private AtomicLong revisionCounter;
-        private Box internalError; // Returned on uncaught internal errors
 
-        public WriterActor(IndexWriter indexWriter, AtomicLong revisionCounter){
+        public WriterActor(IndexWriter indexWriter,
+                           IndexReader indexReader,
+                           AtomicLong revisionCounter) {
             this.indexWriter = indexWriter;
+            this.indexReader = indexReader;
             this.revisionCounter = revisionCounter;
             boxReader = new JSonBoxReader(new Box(true));
-            internalError = Box.newMap().put("error", "Internal error");
         }
 
         @Override
@@ -344,22 +388,22 @@ public class BaseActor extends Actor {
 
             assert message instanceof Transaction.Revision;
             Transaction.Revision rev = (Transaction.Revision)message;
+            Check check = new Check();
             check.transactionId = rev.transactionId;
-            check.error = internalError.put("__id__", rev.id);
             Term idTerm = new Term("__id__", rev.id);
             try {
-                long revno = findRevisionNumber(idTerm);
+                long currentRev = findRevisionNumber(idTerm);
 
                 // If revision is specified correctly, then update it,
                 // otherwise send back an error
-                if (revno == rev.rev) {
-                    Document doc = boxToDocument(
-                                    rev.box, revisionCounter.incrementAndGet());
-                    if (revno > 0) {
+                if (currentRev == rev.rev) {
+                    long newRev = revisionCounter.incrementAndGet();
+                    rev.box.put("__rev__", newRev);
+                    Document doc = boxToDocument(rev.box);
+                    if (currentRev > 0) {
                         // Update an exisiting document
                         if (rev.type == Transaction.Revision.UPDATE) {
-                            indexWriter.deleteDocuments(idTerm);
-                            indexWriter.addDocument(doc);
+                            indexWriter.updateDocument(idTerm, doc);
                         } else if (rev.type == Transaction.Revision.DELETE){
                             indexWriter.deleteDocuments(idTerm);
                         }
@@ -371,29 +415,30 @@ public class BaseActor extends Actor {
                 } else {
                     check.error = Box.newMap()
                                          .put("__id__", rev.id)
-                                         .put("__rev__", revno)
+                                         .put("__rev__", currentRev)
                                          .put("error", "conflict");
                 }
-            } catch (IOException e) {
+            } catch (Throwable t) {
                 check.transactionId = rev.transactionId;
                 check.error = Box.newMap()
                                      .put("__id__", rev.id)
-                                     .put("error", e.getMessage());
+                                     .put("error", t.getMessage());
+                t.printStackTrace();
+                System.err.println("Error caught while updating index");
             } finally {
                 send(check, rev.getReplyTo());
             }
         }
 
         private long findRevisionNumber(Term idTerm) throws IOException {
-            IndexReader r = indexWriter.getReader();
-            TermDocs docs = r.termDocs(idTerm);
+            TermDocs docs = indexReader.termDocs(idTerm);
             try {
                 if (!docs.next()) {
                     return 0;
                 }
 
                 long revno;
-                Document doc = r.document(docs.doc());
+                Document doc = indexReader.document(docs.doc());
                 Fieldable f = doc.getFieldable("__rev__");
                 if (f instanceof NumericField) {
                     revno = ((NumericField)f).getNumericValue().longValue();
@@ -403,7 +448,8 @@ public class BaseActor extends Actor {
 
                 if (docs.next()) {
                     System.err.println(String.format(
-                            "INTERNAL ERROR: Duplicate entries for '%s'", idTerm.text()));
+                            "INTERNAL ERROR: Duplicate entries for '%s'",
+                            idTerm.text()));
                 }
 
 
@@ -413,9 +459,10 @@ public class BaseActor extends Actor {
             }
         }
 
-        private Document boxToDocument(Box box, long rev) {
+        private Document boxToDocument(Box box) {
             Document doc = new Document();
             String id = box.getString("__id__");
+            long rev = box.getLong("__rev__");
             String body = boxReader.reset(box).asString();
 
             // Add stored fields
