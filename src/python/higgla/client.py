@@ -18,7 +18,8 @@ class Session:
         Create a new session
 
         :param host: The host name of the server running the Higgla service
-        :param port: The port on which the remote Higgla service is available
+        :param port: The port on which the remote Higgla service is available.
+            The default port for the Higgla server is 4567.
         :param base: Name of the base this session should query and store boxes
            in
         """

@@ -1,0 +1,33 @@
+README for the Higgla Python Client Library
+================================================================================
+
+Copyright: 2010 the State and University Library of Denmark
+Author: Mikkel Kamstrup Erlandsen <mke@statsbiblioteket.dk>
+License: Apache 2 - see the LICENSE and NOTICE files
+
+Install with:
+
+  sudo python setup.py install
+
+Sample session
+--------------
+
+Connecting to the server:
+
+>>> session = higgla.Session("localhost", 4567, "mybase")
+
+Storing box:
+
+>>> # Arguments are: box_id, revision, *indexed_fields, **fields
+>>> box = session.prepare_box("mke", 0, "firstname",
+...                           firstname="Mikkel", lastname="Kamstrup")
+>>>
+>>> # Boxes are really just dicts - so we can add more data
+>>> box["address"] = "57 Mount Pleasant Street"
+>>>
+>>> # Store the box on the server - server side errors are wrapped
+>>> # in HigglaExceptions
+>>> try:
+...     print str(session.store([box]))
+... except HigglaException, e:
+...     print "Error storing box: %s" % e
