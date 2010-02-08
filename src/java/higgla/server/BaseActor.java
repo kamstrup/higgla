@@ -132,11 +132,14 @@ public class BaseActor extends Actor {
                     indexWriter.rollback();
                     renewWriter();
                 } catch (IOException e) {
+                    System.err.println("Num errors: " + actualTransactionErrors.size());
+                    for (Box errorBox : actualTransactionErrors) {
+                        System.err.println(errorBox.toString());
+                    }
                     e.printStackTrace();
                     System.err.println(String.format(
                          "I/O Error while rolling back transaction '%s': %s",
                          actualTransaction.getId(), e.getMessage()));
-                    return;
                 } finally {
                     Box reply = formatMsg(
                             Long.toString(actualTransaction.getId()), "error");
@@ -151,8 +154,8 @@ public class BaseActor extends Actor {
                     actualTransaction = null;
                     actualTransactionErrors = new LinkedList<Box>();
                     renewWriter();
-                    return;
                 }
+                return;
             }
 
             try {
@@ -388,25 +391,30 @@ public class BaseActor extends Actor {
         private long findRevisionNumber(Term idTerm) throws IOException {
             IndexReader r = indexWriter.getReader();
             TermDocs docs = r.termDocs(idTerm);
+            try {
+                if (!docs.next()) {
+                    return 0;
+                }
 
-            if (!docs.next()) {
-                return 0;
-            }
+                long revno;
+                Document doc = r.document(docs.doc());
+                Fieldable f = doc.getFieldable("__rev__");
+                if (f instanceof NumericField) {
+                    revno = ((NumericField)f).getNumericValue().longValue();
+                } else {
+                    revno = Long.parseLong(f.stringValue());
+                }
 
-            long revno;
-            Document doc = r.document(docs.doc());
-            Fieldable f = doc.getFieldable("__rev__");
-            if (f instanceof NumericField) {
-                revno = ((NumericField)f).getNumericValue().longValue();
-            } else {
-                revno = Long.parseLong(f.stringValue());
-            }
+                if (docs.next()) {
+                    System.err.println(String.format(
+                            "INTERNAL ERROR: Duplicate entries for '%s'", idTerm.text()));
+                }
 
-            if (docs.next()) {
-                System.err.println(String.format(
-                  "INTERNAL ERROR: Duplicate entries for '%s'", idTerm.text()));
+
+                return revno;
+            } finally {
+                docs.close();
             }
-            return revno;
         }
 
         private Document boxToDocument(Box box, long rev) {
