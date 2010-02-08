@@ -1,16 +1,23 @@
 package higgla.server;
 
 import juglr.*;
+import org.apache.lucene.analysis.Analyzer;
+import org.apache.lucene.analysis.TokenStream;
+import org.apache.lucene.analysis.standard.StandardAnalyzer;
+import org.apache.lucene.analysis.tokenattributes.TermAttribute;
 import org.apache.lucene.document.Document;
 import org.apache.lucene.index.IndexReader;
 import org.apache.lucene.index.Term;
 import org.apache.lucene.search.*;
 import org.apache.lucene.store.FSDirectory;
+import org.apache.lucene.util.Version;
 
 import static org.apache.lucene.search.BooleanClause.Occur;
 
 import java.io.File;
 import java.io.IOException;
+import java.io.StringReader;
+import java.util.Collections;
 import java.util.Map;
 
 /**
@@ -54,10 +61,13 @@ import java.util.Map;
 public class QueryActor extends HigglaActor {
 
     private BoxParser boxParser;
+    private Analyzer indexAnalyzer;
 
     public QueryActor() {
         super("__base__", "__query__");
         boxParser = new JSonBoxParser();
+        indexAnalyzer = new StandardAnalyzer(
+                                Version.LUCENE_CURRENT, Collections.EMPTY_SET);
     }
 
     @Override
@@ -94,7 +104,7 @@ public class QueryActor extends HigglaActor {
         // Execute query, collect __body__ fields, parse them as Boxes,
         // and return to sender
         IndexSearcher searcher = null;
-        IndexReader reader = null;
+        IndexReader reader;
         Box envelope = Box.newMap();
         Box results = Box.newList();
         envelope.put("__results__", results);
@@ -170,14 +180,14 @@ public class QueryActor extends HigglaActor {
                                 field.name, valueBox.toString())), field.occur);
                         break;
                     case STRING:
-                        // FIXME: Run a StandardAnalyzer over the string
-                        //        and join an AND query over the tokens
                         if (field.isPrefix) {
                             qTmpl.add(new PrefixQuery(new Term(
                                field.name, valueBox.getString())), field.occur);
                         } else {
-                            qTmpl.add(new TermQuery(new Term(
-                                    field.name, valueBox.getString())), field.occur);
+
+                            qTmpl.add(parseIndexQuery(
+                                  field.name, valueBox.getString(), Occur.MUST),
+                                  field.occur);
                         }
                         break;
                     case MAP:
@@ -189,6 +199,28 @@ public class QueryActor extends HigglaActor {
         }
 
         return q;
+    }
+
+    /* Create a query on a given field by tokenizing a string with
+     * the indexAnalyzer, joining all terms with the boolean op. termJoin */
+    private Query parseIndexQuery(String field, String query, Occur termJoin) {
+        BooleanQuery indexQuery = new BooleanQuery();
+        try {
+            TokenStream tokens = indexAnalyzer.reusableTokenStream(
+                                                   "", new StringReader(query));
+            while(tokens.incrementToken()) {
+                TermAttribute term = tokens.getAttribute(TermAttribute.class);
+                indexQuery.add(
+                        new TermQuery(new Term(field, term.term())), termJoin);
+            }
+        } catch (IOException e) {
+            e.printStackTrace();
+            System.err.println(
+                          "I/O error parsing query. This should never happen");
+            return new TermQuery(new Term("__error__", ""));
+        }
+
+        return indexQuery;
     }
 
     private static class FieldSpec {
