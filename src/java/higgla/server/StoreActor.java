@@ -36,11 +36,8 @@ import java.util.*;
  */
 public class StoreActor extends HigglaActor {
 
-    private Map<String,Address> bases;
-
     public StoreActor() {
         super("__store__", "__base__");
-        bases = new HashMap<String,Address>();
     }
 
     @Override
@@ -90,14 +87,14 @@ public class StoreActor extends HigglaActor {
     }
 
     private void sendToBase(Transaction transaction, String base) {
-        Address baseAddress = bases.get(base);
+        // We look up the base actor on each transaction because the base
+        // actor detaches from the bus on critical errors. Since we
+        // create the actor in case it's not found this means that
+        // we will dynamically recreate the base actor if it dies
+        Address baseAddress = getBus().lookup("__base__"+base);
         if (baseAddress == null) {
-            baseAddress = getBus().lookup("__base__"+base);
-            if (baseAddress == null) {
-                baseAddress = new BaseActor(base).getAddress();
-                getBus().start(baseAddress);
-            }
-            bases.put(base, baseAddress);
+            baseAddress = new BaseActor(base).getAddress();
+                getBus().start(baseAddress);            
         }
         send(transaction, baseAddress);
     }
