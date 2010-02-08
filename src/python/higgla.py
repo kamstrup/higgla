@@ -10,7 +10,18 @@ except ImportError:
 import socket
 
 class Session:
+    """
+    A connection to a Higgla server configured to talk to a given base.
+    """
     def __init__ (self, host, port, base):
+        """
+        Create a new session
+
+        :param host: The host name of the server running the Higgla service
+        :param port: The port on which the remote Higgla service is available
+        :param base: Name of the base this session should query and store boxes
+           in
+        """
         self._host = host
         self._port = port
         self._base = base
@@ -18,6 +29,16 @@ class Session:
                            hostname=host, port=port, body_parser=json.load)
 
     def prepare_box(self, id, revision, *index, **kwargs):
+        """
+        Prepare a new empty box for storage in the base. The return value
+        is a :const:`dict` type
+
+        :param id: The unique string id for the box
+        :param revision: The revision number last seen for this box. Use 0 for
+            creating a new box. This version number `must` match the version
+            number that is current in the Higgla base; otherwise :meth:`store`
+            will raise a :class:VersionConflict when you try and store the box
+        """
         if not isinstance(id, (str,unicode)) :
             raise TypeError("Box id must be string or unicode, found %s" % type(id))
         if not isinstance(revision, (int,long)):
@@ -65,7 +86,15 @@ class Session:
         conn = self._http.create()
         conn.send_request(method, url, {} ,msg)
         headers, body = conn.read_response()
+        self._check_error(body)
         return body
+
+    def _check_error(self, body):
+        if body.has_key("error"):
+            error = body["error"]
+            if error == "conflict":
+                raise VersionConflict(body["__id__"], box["__rev__"])
+            raise HigglaException(error)
         
 
 class Query:
@@ -134,7 +163,29 @@ class SocketFactory:
 
 class HTTPProtocolError (Exception):
     def __init__ (self, msg):
-        Error.__init__(self, msg)
+        Exception.__init__(self, msg)
+
+class HigglaException (Exception):
+    """
+    Represents a server side error
+    """
+    def __init__ (self, msg):
+        Exception.__init__(self, msg)
+
+class VersionConflict (HigglaException):
+    def __init__ (self, box_id, expected_revision):
+        HigglaException.__init__(
+         self, "Expected revision %s of box '%s'" % (expected_revision, box_id))
+        self._box_id = box_id
+        self._expected_revision = expected_revision
+
+    def get_box_id(self) :
+        return self._box_id
+    id = property(get_box_id, doc="")
+
+    def get_expected_revision(self):
+        return self._expected_revision
+    expected_revision = property(get_expected_revision)
 
 class HTTPTransaction:
 
@@ -223,10 +274,13 @@ if __name__ == "__main__":
     print ""
 
     print "STORE RESULTS"
-    box = session.prepare_box("mke", 0, "firstname",
+    box = session.prepare_box("mke", 4, "firstname",
                               firstname="Mikkel", lastname="Kamstrup")
     box["address"] = "57 Mount Pleasant Street"
-    print str(session.store([box]))
+    try:
+        print str(session.store([box]))
+    except HigglaException, e:
+        print "Error: %s" % e
     print ""
 
     print "QUERY RESULTS"
