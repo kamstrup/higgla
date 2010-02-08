@@ -271,11 +271,14 @@ if __name__ == "__main__":
     session = Session("localhost", 4567, "mybase")
 
     print "LOOKUP mydoc1 AND mydoc2 RESULTS"
-    print str(session.get(["mydoc1", "mydoc2"]))
+    try:
+        print str(session.get(["mydoc1", "mydoc2"]))
+    except HigglaException, e:
+        print e
     print ""
 
     print "STORE RESULTS"
-    box = session.prepare_box("mke", 4, "firstname",
+    box = session.prepare_box("mke", 0, "firstname",
                               firstname="Mikkel", lastname="Kamstrup")
     box["address"] = "57 Mount Pleasant Street"
     try:
