@@ -132,10 +132,6 @@ public class BaseActor extends Actor {
                     indexWriter.rollback();
                     renewWriter();
                 } catch (IOException e) {
-                    System.err.println("Num errors: " + actualTransactionErrors.size());
-                    for (Box errorBox : actualTransactionErrors) {
-                        System.err.println(errorBox.toString());
-                    }
                     e.printStackTrace();
                     System.err.println(String.format(
                          "I/O Error while rolling back transaction '%s': %s",
