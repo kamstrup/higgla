@@ -26,6 +26,17 @@ import java.util.concurrent.atomic.AtomicLong;
 /**
  * Responsible for handling {@link Transaction}s for a particular base. There
  * will be one {@code BaseActor} for each base the Higgla server has written to.
+ * This is ensured by the base actor grabbing the named address
+ * {@code "__base__<baseName>"} when {@code start()} is called. Since only
+ * one actor can own an address at any given time this ensures that we have
+ * maximally one BaseActor for each base name.
+ * <p/>
+ * The base actor is self-healing in a sense. When it crashes it releases its
+ * well known name, {@code "__base__<baseName>"}. And since the StoreActor
+ * looks up the relevant BaseActor on each incoming {@link Transaction}
+ * and creates the relevant BaseActor if it is not found, the BaseActor will
+ * be "lazily" recreated in case of a crash.
+ *
  *
  * @author Mikkel Kamstrup Erlandsen <mailto:mke@statsbiblioteket.dk>
  * @since Feb 3, 2010
@@ -102,7 +113,8 @@ public class BaseActor extends Actor {
     }
 
     /**
-     * Commits a {@link Transaction} to the Lucene index
+     * Commits a {@link Transaction} to the Lucene index and handles a Check
+     * messages from one of the child WriterActors
      * @param message
      */
     @Override
@@ -191,11 +203,17 @@ public class BaseActor extends Actor {
     }
 
     private void renewReader() throws IOException {
-        IndexReader newIndexReader = indexReader.reopen();
-        if (newIndexReader != indexReader) {
-            // Reader was reopened
-            indexReader.close();
-            indexReader = newIndexReader;
+        if (indexReader != null) {
+            // Note that the read-only mode of the original reader is inherited
+            IndexReader newIndexReader = indexReader.reopen();
+            if (newIndexReader != indexReader) {
+                // Reader was reopened
+                indexReader.close();
+                indexReader = newIndexReader;
+            }
+        } else {
+            // Open the reader in read-only mode
+            indexReader = IndexReader.open(baseDir, true);
         }
     }
 
@@ -210,32 +228,32 @@ public class BaseActor extends Actor {
                 indexWriter.close();
             } catch (IOException e) {
                 e.printStackTrace();
-                System.err.println("I/O Error renewing index writer");
+                System.err.println(String.format(
+                    "I/O Error renewing index writer for base '%s'", baseName));
             }
         }
-        if (indexReader != null) {
-            try {
-                indexReader.close();
-            } catch (IOException e) {
-                e.printStackTrace();
-                System.err.println("I/O Error renewing index writer");
-            }
-        }
-
-
         try {
             indexWriter = new IndexWriter(baseDir,
                                           new StandardAnalyzer(
                                                   Version.LUCENE_CURRENT,
                                                   Collections.EMPTY_SET),
                                           IndexWriter.MaxFieldLength.LIMITED);
-            indexReader = IndexReader.open(baseDir, true);
         } catch (IOException e) {
             // Failed to open the index. Retract this actor from the bus
             shutdown();
             e.printStackTrace();
             System.err.println(String.format(
-                       "Failed to create base '%s'", baseName));
+                       "I/O error creating base '%s'", baseName));
+        }
+
+        try {
+            renewReader();
+        } catch (IOException e) {
+            // Failed to open the reader. Retract this actor from the bus
+            shutdown();
+            e.printStackTrace();
+            System.err.println(String.format(
+                       "I/O error reading base data for '%s'", baseName));
         }
 
         writer = new WriterActor(
