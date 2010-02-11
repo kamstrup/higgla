@@ -56,6 +56,7 @@ public class BaseActor extends Actor {
     private int actualTransactionLatch;
     private Transaction actualTransaction;
     private List<Box> actualTransactionErrors;
+    private Box actualTransactionRevisions;
     private IndexWriter indexWriter;
     private IndexReader indexReader;
     private Address writer;
@@ -68,7 +69,6 @@ public class BaseActor extends Actor {
     public BaseActor(String baseName) {        
         this.baseName = baseName;
         todo = new PriorityQueue<Transaction>();
-        actualTransactionErrors = new LinkedList<Box>();
 
         // Pre-allocate resources for the higgla.meta file
         metaBuffer = ByteBuffer.allocate(META_SIZE);
@@ -135,12 +135,22 @@ public class BaseActor extends Actor {
         assert check.transactionId == actualTransaction.getId();
         actualTransactionLatch--;
 
+        actualTransactionRevisions.put(check.boxId, check.boxRevision);
+
         if (check.error != null) {
             actualTransactionErrors.add(check.error);
         }
 
         if (actualTransactionLatch == 0) {
-            if (actualTransactionErrors.size() != 0) {
+            // Reset and prepare for next transaction
+            Transaction closingTransaction = actualTransaction;
+            List<Box> closingTransactionErrors = actualTransactionErrors;
+            Box closingTransactionRevisions = actualTransactionRevisions;
+            actualTransaction = null;
+            actualTransactionErrors = null;
+            actualTransactionRevisions = null;
+
+            if (closingTransactionErrors.size() != 0) {
                 try {
                     indexWriter.rollback();
                     renewWriter();
@@ -148,20 +158,15 @@ public class BaseActor extends Actor {
                     e.printStackTrace();
                     System.err.println(String.format(
                          "I/O Error while rolling back transaction '%s': %s",
-                         actualTransaction.getId(), e.getMessage()));
+                         closingTransaction.getId(), e.getMessage()));
                 } finally {
                     Box reply = formatMsg(
-                            Long.toString(actualTransaction.getId()), "error");
-                    reply.put("transaction", actualTransaction.getId());
-                    reply.put("error", actualTransactionErrors);
-                    send(reply, actualTransaction.getReplyTo());
-
-                    // Reset and prepare for next transaction. Note that we can
-                    // not run actualTransactionErrors.clear() since this list
-                    // is now owned by the reply message. Instead we create a
-                    // new list
-                    actualTransaction = null;
-                    actualTransactionErrors = new LinkedList<Box>();
+                            Long.toString(closingTransaction.getId()), "error");
+                    reply.put("transaction", closingTransaction.getId());
+                    reply.put("error", closingTransactionErrors);
+                    reply.put("revisions", closingTransactionRevisions);
+                    send(reply, closingTransaction.getReplyTo());
+                    
                     renewWriter();
                 }
                 return;
@@ -172,31 +177,32 @@ public class BaseActor extends Actor {
                 indexWriter.commit();
                 commitMeta();
                 Box reply = formatMsg(
-                                Long.toString(actualTransaction.getId()), "ok");
-                reply.put("transaction", actualTransaction.getId());
-                send(reply, actualTransaction.getReplyTo());
+                                Long.toString(closingTransaction.getId()), "ok");
+                reply.put("transaction", closingTransaction.getId());
+                reply.put("revisions", closingTransactionRevisions);
+                send(reply, closingTransaction.getReplyTo());
 
-                // Reply has been send; now reload the reader
+                // Reply has been send; now reload the reader to make sure
+                // it sees up to date revisions and ids
                 renewReader();
 
-                actualTransaction = null;
                 scheduleNextTransaction();
             } catch (IOException e) {
+                Box reply = formatMsg(
+                            "error", "Failed to commit transaction '%s': %s",
+                            closingTransaction.getId(), e.getMessage());
+                    reply.put(Long.toString(closingTransaction.getId()), "error");
+                    reply.put("transaction", closingTransaction.getId());
                 try {
-                    Box reply = formatMsg(
-                            Long.toString(actualTransaction.getId()),
-                            "Failed to roll back transaction after failed commit: %s",
-                            e.getMessage());
-                    reply.put("transaction", actualTransaction.getId());
-                    send(reply, actualTransaction.getReplyTo());
                     indexWriter.rollback();
-                    actualTransaction = null;
                     scheduleNextTransaction();
                 } catch (IOException e1) {
                     e.printStackTrace();
                     System.err.println(
                          "Failed to roll back transaction after failed commit");
                     shutdown();
+                } finally {
+                    send(reply, closingTransaction.getReplyTo());
                 }
             }
         }
@@ -338,14 +344,17 @@ public class BaseActor extends Actor {
     }
 
     private void scheduleNextTransaction() {
-        assert actualTransaction == null;
-        assert actualTransactionLatch == 0;
-        assert actualTransactionErrors.size() == 0;
+        assert actualTransaction == null : "Previous transaction not cleared";
+        assert actualTransactionLatch == 0 : "Transaction latch not cleared";
+        assert actualTransactionErrors == null : "Transaction errors remain";
+        assert actualTransactionRevisions == null : "Transaction revisions not reset";
 
         Transaction t = todo.poll();
         if (t != null) {
             actualTransactionLatch = t.size();
             actualTransaction = t;
+            actualTransactionRevisions = Box.newMap();
+            actualTransactionErrors = new LinkedList<Box>();
             try {
                 renewReader();
             } catch (IOException e) {
@@ -377,8 +386,10 @@ public class BaseActor extends Actor {
     }
 
     private static class Check extends Message {
-        public long transactionId;
-        public Box error; // If set this Check indicates an error
+        public long transactionId;  // Transaction id
+        public Box error;           // If set this Check indicates an error
+        public long boxRevision; // New rev. number
+        public String boxId;        // Id of handled box
     }
 
     private static class WriterActor extends Actor {
@@ -408,6 +419,8 @@ public class BaseActor extends Actor {
             Transaction.Revision rev = (Transaction.Revision)message;
             Check check = new Check();
             check.transactionId = rev.transactionId;
+            check.boxId = rev.id;
+            check.boxRevision = rev.rev;
             Term idTerm = new Term("__id__", rev.id);
             try {
                 long currentRev = findRevisionNumber(idTerm);
@@ -429,6 +442,7 @@ public class BaseActor extends Actor {
                         // This is a new document
                         indexWriter.addDocument(doc);
                     }
+                    check.boxRevision = newRev;
                     check.error = null;
                 } else {
                     check.error = Box.newMap()
