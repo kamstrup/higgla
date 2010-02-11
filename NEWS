@@ -1,5 +1,12 @@
 ========================
-2010-MM-DD: Higgla 0.0.1
+2010-02-11: Higgla 0.0.2
+========================
+
+ * Fix bug in higgla.sh causing a ClassNotFoundException because it put
+   juglr-0.2.0.jar in the classpath whewn it should have been 0.2.1.
+
+========================
+2010-02-10: Higgla 0.0.1
 ========================
 
  * Initial pre-alpha preview release. Release early release often as they say.
