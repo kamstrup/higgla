@@ -17,11 +17,20 @@
   To store a document in Higgla you can use the 'curl' command line tool,
   which is standard on most unix systems, like so:
 
-    curl http://localhost:4567/actor/store/ \
-    -d '{ "__id__" : "foo", "__base__" : "pappa", "myfield" : "my field contains data" }'
+    curl http://localhost:4567/actor/store/ -d \
+    '{ "__base__" : "books", 
+        "__store__" : [
+          {
+            "__id__" : "book_1",
+            "__rev__" : 0,
+            "title" : "Dive Into Python",
+            "myfield" : ["a", "list", "indeed"]
+          }
+        ]
+    }'
 
   DEPENDENCIES
-   * juglr >= 0.0.3
+   * juglr >= 0.2.1
    * lucene-core > 3.0.0
    * jsr166 (for Juglr)
    * Java 6+
