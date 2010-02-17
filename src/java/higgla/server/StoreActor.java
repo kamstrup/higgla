@@ -1,22 +1,6 @@
 package higgla.server;
 
 import juglr.*;
-import org.apache.lucene.analysis.Analyzer;
-import org.apache.lucene.analysis.standard.StandardAnalyzer;
-import org.apache.lucene.document.Document;
-import org.apache.lucene.document.Field;
-import static org.apache.lucene.document.Field.Store;
-import static org.apache.lucene.document.Field.Index;
-
-import org.apache.lucene.document.NumericField;
-import org.apache.lucene.index.IndexWriter;
-import org.apache.lucene.store.Directory;
-import org.apache.lucene.store.FSDirectory;
-import org.apache.lucene.util.Version;
-
-import java.io.File;
-import java.io.IOException;
-import java.util.*;
 
 /**
  * And actor that stores messages in a Lucene index. The stored messages
@@ -93,7 +77,7 @@ public class StoreActor extends HigglaActor {
         // we will dynamically recreate the base actor if it dies
         Address baseAddress = getBus().lookup("/__base__"+base);
         if (baseAddress == null) {
-            baseAddress = new BaseActor(base).getAddress();
+            baseAddress = new WriterActor(base).getAddress();
             getBus().start(baseAddress);
         }
         send(transaction, baseAddress);

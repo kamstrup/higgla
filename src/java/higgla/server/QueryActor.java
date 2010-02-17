@@ -1,6 +1,8 @@
 package higgla.server;
 
 import juglr.*;
+import juglr.net.HTTP;
+import juglr.net.HTTPResponse;
 import org.apache.lucene.analysis.Analyzer;
 import org.apache.lucene.analysis.TokenStream;
 import org.apache.lucene.analysis.standard.StandardAnalyzer;
@@ -58,87 +60,137 @@ import java.util.Map;
  * @author Mikkel Kamstrup Erlandsen <mailto:mke@statsbiblioteket.dk>
  * @since Jan 29, 2010
  */
-public class QueryActor extends HigglaActor {
+public class QueryActor extends BaseActor {
 
     private BoxParser boxParser;
     private Analyzer indexAnalyzer;
 
-    public QueryActor() {
-        super("__base__", "__query__");
+    public QueryActor(String baseName) {
+        super(baseName);
         boxParser = new JSonBoxParser();
         indexAnalyzer = new StandardAnalyzer(
                                 Version.LUCENE_CURRENT, Collections.EMPTY_SET);
     }
 
     @Override
+    public void start() {
+        try {
+            getBus().allocateNamedAddress(this,
+                                          QueryActor.baseAddress(baseName));
+        } catch (AddressAlreadyOwnedException e) {
+            // Another QueryActor is already running for this base.
+            // Retract from the bus silently
+            getBus().freeAddress(getAddress());
+        }
+    }
+
+    @Override
     public void react(Message message) {
-        Box box;
-        try {
-            box = validate(message);
-        } catch (MessageFormatException e) {
-            send(
-               formatMsg("error", "Invalid message format: %s", e.getMessage()),
-               message.getReplyTo());
+        if (!(message instanceof Box)) {
+            replyTo(message, HTTP.Status.InternalError, "error",
+                    "Expected Box. Found '%s'", message.getClass().getName());
             return;
         }
+
+        Box box = (Box)message;
         
-        String base = box.getString("__base__");
-        Box queryBox = box.get("__query__");
-
-        // Parse the query
-        Query query;
-        try {
-            query = parseQuery(queryBox);
-        } catch (MessageFormatException e) {
-            send(
-               formatMsg("error", "Invalid message format: %s", e.getMessage()),
-               message.getReplyTo());
-            return;
-        } catch (Box.TypeException e) {
-            send(
-               formatMsg("error", "Invalid message type: %s", e.getMessage()),
-               message.getReplyTo());
+        if (box.getType() != Box.Type.MAP) {
+            replyTo(message, HTTP.Status.BadRequest, "error",
+                    "Expected MAP. Got '%s'", box.getType());
             return;
         }
 
-        // Execute query, collect __body__ fields, parse them as Boxes,
-        // and return to sender
-        IndexSearcher searcher = null;
-        IndexReader reader;
-        Box envelope = Box.newMap();
-        Box results = Box.newList();
-        envelope.put("__results__", results);
+        if (box.getMap().size() == 0) {
+            replyTo(message, HTTP.Status.BadRequest, "error",
+                    "No queries in request");
+            return;
+        }
+
+        // Any key in the query MAP not starting with _ is to be
+        // executed as a single query
+        // {
+        //   queryName1 : list of box templates to match
+        //   queryName2 : list of box templates to match
+        //   _privateField1 : stuff
+        //   ...
+        // }
+        // Our response looks like:
+        // {
+        //    queryName1 : list of results
+        //    queryName2 : list of result
+        // }
+        //
+
+        IndexSearcher searcher;
         try {
-            searcher = takeSearcher(base);
-            reader = searcher.getIndexReader();
-            TopDocs docs = searcher.search(query, 10);
-            for (ScoreDoc scoreDoc : docs.scoreDocs) {
-                Document doc = reader.document(scoreDoc.doc);
-                Box resultBox = boxParser.parse(
-                                    doc.getField("__body__").stringValue());
-                results.add(resultBox);
-            }
-            send(envelope, message.getReplyTo());
+            searcher = takeSearcher(baseName);
         } catch (IOException e) {
-            send(
-               formatMsg("error", "Error executing query: %s", e.getMessage()),
-               message.getReplyTo());
+            e.printStackTrace();
+            replyTo(message, HTTP.Status.InternalError, "error",
+                    "Error opening searcher: %s", e.getMessage());
+            return;
+        }
+
+        Box reply = Box.newMap();
+        try {
+            for (Map.Entry<String,Box> queryBox : box.getMap().entrySet()) {
+                // FIXME: Parallelize queries
+                Box result = executeQuery(queryBox.getValue(), searcher);
+                reply.put(queryBox.getKey(), result);
+            }
+        } catch (MessageFormatException e) {
+            reply = formatMessage("error",
+                                  "Invalid message format: %s", e.getMessage());
+        } catch (Box.TypeException e) {
+            reply = formatMessage("error",
+                                  "Invalid message type: %s", e.getMessage());
+        } catch (IOException e) {
+            reply = formatMessage("error",
+                                  "Error executing query: %s", e.getMessage());
         } catch (Throwable t) {
             t.printStackTrace();
             String hint = t.getMessage();
             hint = hint != null ? hint : t.getClass().getSimpleName();
-            send(
-                  formatMsg("error", "Internal error: %s", hint),
-                  message.getReplyTo());
+            reply = formatMessage("error", "Internal error: %s", hint);
         } finally {
             try {
                 releaseSearcher(searcher);
             } catch (IOException e) {
-                send(
-                  formatMsg("error", "Error releasing searcher: %s", e.getMessage()),
-                  message.getReplyTo());
+                reply = formatMessage("error",
+                                      "Error releasing searcher: %s",
+                                      e.getMessage());
             }
+
+            send(new HTTPResponse(HTTP.Status.OK, reply), message.getReplyTo());
         }
+
+
+
+
+
+    }
+
+    private Box executeQuery(Box queryBox, IndexSearcher searcher)
+                 throws MessageFormatException, Box.TypeException, IOException {
+        if (queryBox.getList().size() == 0) {
+            return formatMessage("error", "Empty query");
+        }
+
+        Query query = parseQuery(queryBox);
+
+        // Execute query, collect __body__ fields, parse them as Boxes,
+        // and return to sender
+        Box results = Box.newList();
+        searcher = takeSearcher(baseName);
+        TopDocs docs = searcher.search(query, 10);
+        for (ScoreDoc scoreDoc : docs.scoreDocs) {
+            Document doc = searcher.doc(scoreDoc.doc);
+            Box resultBox = boxParser.parse(
+                    doc.getField("__body__").stringValue());
+            results.add(resultBox);
+        }
+
+        return results;
     }
 
     private IndexSearcher takeSearcher(String base) throws IOException {
@@ -153,8 +205,6 @@ public class QueryActor extends HigglaActor {
     }
 
     public Query parseQuery (Box box) throws MessageFormatException {
-        box.checkType(Box.Type.LIST);
-
         BooleanQuery q = new BooleanQuery();
         for (Box tmpl : box.getList()) {
             tmpl.checkType(Box.Type.MAP);
@@ -221,6 +271,10 @@ public class QueryActor extends HigglaActor {
         }
 
         return indexQuery;
+    }
+
+    public static String baseAddress(CharSequence base) {
+        return "/_query_"+base;
     }
 
     private static class FieldSpec {

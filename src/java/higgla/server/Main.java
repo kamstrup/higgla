@@ -31,20 +31,8 @@ public class Main {
 
         // Set up all central actors
         Actor store = new StoreActor();
-        Actor query = new QueryActor();
+        Actor query = new QueryGatewayActor();
         Actor get = new GetActor();
-
-        // Register addresses
-        try {
-            MessageBus.getDefault().allocateNamedAddress(store, "store");
-            MessageBus.getDefault().allocateNamedAddress(query, "query");
-            MessageBus.getDefault().allocateNamedAddress(get, "get");
-        } catch (AddressAlreadyOwnedException e) {
-            System.err.println(
-                    "Failed to allocate address on the message bus: "
-                    + e.getMessage());
-            System.exit(2);
-        }
 
         // Start actors
         MessageBus.getDefault().start(store.getAddress());
@@ -63,6 +51,7 @@ public class Main {
 
         server.registerHandler(
                     "^/[^/]+/query/?$", query.getAddress(), HTTP.Method.GET);
+                    //".*", query.getAddress(), HTTP.Method.GET);
         //server.registerHandler(
         //            "^/[^/]+/search\\?.+$", search.getAddress(), HTTP.Method.GET);
         //server.registerHandler(
@@ -75,6 +64,8 @@ public class Main {
         //            "^/[^/]+/[^/]+$", get.getAddress(), HTTP.Method.GET);
         //server.registerHandler(
         //            "^/[^/]+/[^/]+$", put.getAddress(), HTTP.Method.PUT);
+
+        server.start();
 
         // Indefinite non-busy block
         synchronized (store) {
