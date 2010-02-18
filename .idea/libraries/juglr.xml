@@ -1,11 +1,13 @@
 <component name="libraryTable">
   <library name="juglr">
     <CLASSES>
-      <root url="jar://$PROJECT_DIR$/lib/juglr-0.2.1.jar!/" />
+      <root url="jar://$PROJECT_DIR$/lib/juglr-0.3.0.jar!/" />
     </CLASSES>
     <JAVADOC>
-      <root url="jar://$PROJECT_DIR$/lib/juglr-0.2.1-apidocs.zip!/apidocs" />
+      <root url="jar://$PROJECT_DIR$/lib/juglr-0.3.0-apidocs.zip!/" />
     </JAVADOC>
-    <SOURCES />
+    <SOURCES>
+      <root url="file://$PROJECT_DIR$/../juglr/src/java" />
+    </SOURCES>
   </library>
 </component>
