@@ -1,5 +1,27 @@
-import higgla.client
+if __name__ == "__main__":
+    import json
 
-Session = higgla.client.Session
-Query = higgla.client.Query
-HigglaException = higgla.client.HigglaException
+    from higgla.client import *
+    session = higgla.client.Session("mybase")
+
+    print "LOOKUP mydoc1 AND mydoc2 RESULTS"
+    try:
+        print str(session.get("mydoc1", "mydoc2"))
+    except HigglaException, e:
+        print e
+    print ""
+
+    print "STORE RESULTS"
+    box = session.prepare_box("mke", 0, "firstname",
+                              firstname="Mikkel", lastname="Kamstrup")
+    box["address"] = "57 Mount Pleasant Street"
+    try:
+        print str(json.dumps(session.store(box), indent=2))
+    except HigglaException, e:
+        print "Error: %s" % e
+    print ""
+
+    print "QUERY RESULTS"
+    q = session.prepare_query(firstname="mikkel")
+    print str(json.dumps(session.send_query(myquery=q), indent=2))
+    print ""
