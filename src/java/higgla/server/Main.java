@@ -30,12 +30,12 @@ public class Main {
         }
 
         // Set up all central actors
-        Actor store = new StoreActor();
+        Actor writer = new WriterGatewayActor();
         Actor query = new QueryGatewayActor();
         Actor get = new GetActor();
 
         // Start actors
-        MessageBus.getDefault().start(store.getAddress());
+        MessageBus.getDefault().start(writer.getAddress());
         MessageBus.getDefault().start(query.getAddress());
         MessageBus.getDefault().start(get.getAddress());
 
@@ -50,7 +50,9 @@ public class Main {
         }
 
         server.registerHandler(
-                    "^/[^/]+/query/?$", query.getAddress(), HTTP.Method.GET);
+                    "^/[^/]+/?$", query.getAddress(), HTTP.Method.GET);
+        server.registerHandler(
+                    "^/[^/]+/?$", writer.getAddress(), HTTP.Method.POST);
                     //".*", query.getAddress(), HTTP.Method.GET);
         //server.registerHandler(
         //            "^/[^/]+/search\\?.+$", search.getAddress(), HTTP.Method.GET);
@@ -59,8 +61,6 @@ public class Main {
         //server.registerHandler(
         //            "^/[^/]+/count/?$", count.getAddress(), HTTP.Method.GET);
         //server.registerHandler(
-        //            "^/[^/]+/changes\\?.+$", changes.getAddress(), HTTP.Method.GET);
-        //server.registerHandler(
         //            "^/[^/]+/[^/]+$", get.getAddress(), HTTP.Method.GET);
         //server.registerHandler(
         //            "^/[^/]+/[^/]+$", put.getAddress(), HTTP.Method.PUT);
@@ -68,9 +68,9 @@ public class Main {
         server.start();
 
         // Indefinite non-busy block
-        synchronized (store) {
+        synchronized (writer) {
             try {                
-                store.wait();
+                writer.wait();
             } catch (InterruptedException e) {
                 System.err.println("Interrupted");
                 System.exit(1);
