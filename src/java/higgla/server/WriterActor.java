@@ -27,16 +27,15 @@ import java.util.concurrent.atomic.AtomicLong;
  * Responsible for handling {@link Transaction}s for a particular base. There
  * will be one {@code BaseActor} for each base the Higgla server has written to.
  * This is ensured by the base actor grabbing the named address
- * {@code "__base__<baseName>"} when {@code start()} is called. Since only
+ * {@code "_writer_<baseName>"} when {@code start()} is called. Since only
  * one actor can own an address at any given time this ensures that we have
  * maximally one WriterActor for each base name.
  * <p/>
  * The base actor is self-healing in a sense. When it crashes it releases its
- * well known name, {@code "__base__<baseName>"}. And since the StoreActor
- * looks up the relevant WriterActor on each incoming {@link Transaction}
- * and creates the relevant WriterActor if it is not found, the WriterActor will
- * be "lazily" recreated in case of a crash.
- *
+ * well known name, {@code "_writer__<baseName>"}. And since the
+ * WriterGatewayActor looks up the relevant WriterActor on each incoming
+ * {@link Transaction} and creates the relevant WriterActor if it is not found,
+ * the WriterActor will be "lazily" recreated in case of a crash.
  *
  * @author Mikkel Kamstrup Erlandsen <mailto:mke@statsbiblioteket.dk>
  * @since Feb 3, 2010
@@ -78,8 +77,8 @@ public class WriterActor extends Actor {
     @Override
     public void start() {
         try {
-            baseAddress = getBus().allocateNamedAddress(this,
-                                                        "__base__" + baseName);
+            baseAddress = getBus().allocateNamedAddress(
+                                       this, WriterActor.baseAddress(baseName));
         } catch (AddressAlreadyOwnedException e) {
             // There was a race creating this WriterActor and another actor
             // is already responsible for this base so we silently retract
@@ -125,7 +124,7 @@ public class WriterActor extends Actor {
             handleCheck((Check)message);
         } else {
             throw new MessageFormatException(
-                    "Expected Storage.Transaction. Got "
+                    "Expected Transaction or Check. Got "
                     + message.getClass().getName());
         }
     }
@@ -359,14 +358,14 @@ public class WriterActor extends Actor {
                 renewReader();
             } catch (IOException e) {
                 // Print error, put transaction back in queue, and shutdown.
-                // Next time a transaction is send our way the StoreActor
+                // Next time a transaction is send our way the WriterGatewayActor
                 // will re-create a WriterActor instance
                 e.printStackTrace();
                 System.err.println("I/O error reopening index reader");
                 shutdown();
             }
 
-            // We create a new writeractor for each transaction
+            // We create a new WriterDelegate for each transaction
             send(WriterDelegate.SHUTDOWN, writer);
             writer = new WriterDelegate(
                         indexWriter, indexReader, revisionCounter).getAddress();
@@ -385,10 +384,14 @@ public class WriterActor extends Actor {
         return Box.newMap().put(field, String.format(format, args));
     }
 
+    public static String baseAddress(CharSequence baseName) {
+        return "/_writer_"+baseName;
+    }
+
     private static class Check extends Message {
         public long transactionId;  // Transaction id
         public Box error;           // If set this Check indicates an error
-        public long boxRevision; // New rev. number
+        public long boxRevision;    // New rev. number
         public String boxId;        // Id of handled box
     }
 
@@ -421,7 +424,7 @@ public class WriterActor extends Actor {
             check.transactionId = rev.transactionId;
             check.boxId = rev.id;
             check.boxRevision = rev.rev;
-            Term idTerm = new Term("__id__", rev.id);
+            Term idTerm = new Term("_id", rev.id);
             try {
                 long currentRev = findRevisionNumber(idTerm);
 
@@ -429,7 +432,7 @@ public class WriterActor extends Actor {
                 // otherwise send back an error
                 if (currentRev == rev.rev) {
                     long newRev = revisionCounter.incrementAndGet();
-                    rev.box.put("__rev__", newRev);
+                    rev.box.put("_rev", newRev);
                     Document doc = boxToDocument(rev.box);
                     if (currentRev > 0) {
                         // Update an exisiting document
@@ -446,14 +449,14 @@ public class WriterActor extends Actor {
                     check.error = null;
                 } else {
                     check.error = Box.newMap()
-                                         .put("__id__", rev.id)
-                                         .put("__rev__", currentRev)
+                                         .put("_id", rev.id)
+                                         .put("_rev", currentRev)
                                          .put("error", "conflict");
                 }
             } catch (Throwable t) {
                 check.transactionId = rev.transactionId;
                 check.error = Box.newMap()
-                                     .put("__id__", rev.id)
+                                     .put("_id", rev.id)
                                      .put("error", t.getMessage());
                 t.printStackTrace();
                 System.err.println("Error caught while updating index");
@@ -471,7 +474,7 @@ public class WriterActor extends Actor {
 
                 long revno;
                 Document doc = indexReader.document(docs.doc());
-                Fieldable f = doc.getFieldable("__rev__");
+                Fieldable f = doc.getFieldable("_rev");
                 if (f instanceof NumericField) {
                     revno = ((NumericField)f).getNumericValue().longValue();
                 } else {
@@ -493,22 +496,22 @@ public class WriterActor extends Actor {
 
         private Document boxToDocument(Box box) {
             Document doc = new Document();
-            String id = box.getString("__id__");
-            long rev = box.getLong("__rev__");
+            String id = box.getString("_id");
+            long rev = box.getLong("_rev");
             String body = boxReader.reset(box).asString();
 
             // Add stored fields
             doc.add(new Field(
-                    "__id__", id, Field.Store.YES, Field.Index.NOT_ANALYZED));
+                    "_id", id, Field.Store.YES, Field.Index.NOT_ANALYZED));
             doc.add(new NumericField(
-                    "__rev__", Field.Store.YES, true).setLongValue(rev));
+                    "_rev", Field.Store.YES, true).setLongValue(rev));
             doc.add(new Field(
-                    "__body__", body, Field.Store.YES, Field.Index.NO));
+                    "_body", body, Field.Store.YES, Field.Index.NO));
 
             // Indexed fields
             List<Box> indexFields;
-            if (box.has("__index__")) {
-                indexFields = box.getList("__index__");
+            if (box.has("_index")) {
+                indexFields = box.getList("_index");
             } else {
                 indexFields = Collections.EMPTY_LIST;
             }
