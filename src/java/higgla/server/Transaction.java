@@ -54,8 +54,8 @@ public class Transaction extends Message implements
     private Revision prepareRevision(Box box, int revType)
             throws TransactionException {
         Revision rev = new Revision();
-        rev.id = box.getString("__id__");
-        rev.rev = box.getLong("__rev__");
+        rev.id = box.getString("_id");
+        rev.rev = box.getLong("_rev");
         rev.box = box;
         rev.type = revType;
         rev.transactionId = transactionId;

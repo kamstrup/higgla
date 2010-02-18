@@ -186,7 +186,7 @@ public class QueryActor extends BaseActor {
         for (ScoreDoc scoreDoc : docs.scoreDocs) {
             Document doc = searcher.doc(scoreDoc.doc);
             Box resultBox = boxParser.parse(
-                    doc.getField("__body__").stringValue());
+                    doc.getField("_body").stringValue());
             results.add(resultBox);
         }
 
@@ -267,7 +267,7 @@ public class QueryActor extends BaseActor {
             e.printStackTrace();
             System.err.println(
                           "I/O error parsing query. This should never happen");
-            return new TermQuery(new Term("__error__", ""));
+            return new TermQuery(new Term("_error", ""));
         }
 
         return indexQuery;
