@@ -23,37 +23,80 @@ import java.util.Collections;
 import java.util.Map;
 
 /**
- * Queries a Lucene index based on a Box/JSON template. The incoming message
- * must be of Box type {@code MAP} containing a field named {@code __base__}
- * naming the base to query. The actual query is read from the field
- * {@code __query__} and this field must be a list of {@code MAP}s.
- * Each map will be treated as a template to match, joining all
- * fields in the map with {@code AND} conditions. The full list of templates
- * will joined into one {@code OR} query.
+ * Queries a Lucene index based on Box/JSON templates. The incoming message
+ * must be of Box type {@code MAP} containing a collection of queries to
+ * execute. Each entry assigns a <i>query name</i> a <i>query instance</i>.
+ * The query name is a free form string not starting with and underscore, _.
+ * The query instance is a MAP contaning the fields:
+ * <ul>
+ *   <li>{@code _offset} - Integer offset into the result from which to
+ *       return results. If left out, the default is 0.</li>
+ *   <li>{@code _count} - An integer defining the maximum number of results to
+ *       return, starting from {@code _offset}. If left out the default is
+ *       20</li>
+ *   <li>{@code _templates} - a LIST of Box templates results should match.
+ *       A Box is considered matching if at matches at least one of the
+ *       templates</li>
+ * </ul>
  * <p/>
- * So to query the base "mybase" for all documents with the word "john" in the
+ * The QueryActor will reply to {@code box.getReplyTo()} with a
+ * {@link HTTPResponse} with the body set to a Box of MAP type. The response
+ * body contains one entry per named query in the request, with value
+ * set to a Box with the following fields:
+ * <ul>
+ *   <li>{@code _total} - Total number of matching boxes. Integer</li>
+ *   <li>{@code _count} - The number of boxes returned out of the total.
+ *       Integer</li>
+ *   <li>{@code _data} - a LIST containing {@code _count} Boxes with the
+ *       retrieved results</li>
+ * </ul>
+ * <p/>
+ * So to query all boxes with the word "john" in the
  * field "name" you would send:
  * <pre>
  *   {
- *     "__base__" : "mybase",
- *     "__query__" : [{ "name" : "john" }]
+ *     "myquery" : {
+ *         _offset : 0,
+ *         _count : 10,
+ *         _templates : [{name:"john"}]
+ *     }
  *   }
  * </pre>
- * If you wanted to search for "john" or "frank" in the "name" field you would
+ * If you wanted to search for "john" or "frank" in the "name" field you could
  * do:
  * <pre>
  *   {
- *     "__base__" : "mybase",
- *     "__query__" : [{ "name" : "john" }, { "name" : "frank" }]
+ *     "myquery" : {
+ *         _offset : 0,
+ *         _count : 10,
+ *         _templates : [{name:"john"}, {name:"frank"}]
+ *     }
  *   }
  * </pre>
  * If you wanted a more specific John with last name "hansen", but leave the
  * query on Franks open, you simply add another field in John's template:
  * <pre>
  *   {
- *     "__base__" : "mybase",
- *     "__query__" : [{ "name" : "john", "lastname" : "hansen" },
- *                    { "name" : "frank" }]
+ *     "myquery" : {
+ *         _offset : 0,
+ *         _count : 10,
+ *         _templates : [{name:"john", lastname:"hansen"}, {name:"frank"}]
+ *     }
+ *   }
+ * </pre>
+ * It is also possible to send more than one query in the same request. If you
+ * are managing a social database where people rate books and make friends.
+ * People are identified by their email addresses. Say John's email address is
+ * <code>john@example.com</code> you could find John's friends and books
+ * in one request:
+ * <pre>
+ *   {
+ *     "John's books" : {
+ *         _templates : [{type:"book", owner:"john@example.com"}]
+ *     },
+ *     "John's friends" : {
+ *         _templates : [{type:"person", friend:"john@example.com"}]
+ *     }
  *   }
  * </pre>
  *
@@ -106,21 +149,6 @@ public class QueryActor extends BaseActor {
             return;
         }
 
-        // Any key in the query MAP not starting with _ is to be
-        // executed as a single query
-        // {
-        //   queryName1 : list of box templates to match
-        //   queryName2 : list of box templates to match
-        //   _privateField1 : stuff
-        //   ...
-        // }
-        // Our response looks like:
-        // {
-        //    queryName1 : list of results
-        //    queryName2 : list of result
-        // }
-        //
-
         IndexSearcher searcher;
         try {
             searcher = takeSearcher(baseName);
@@ -131,10 +159,15 @@ public class QueryActor extends BaseActor {
             return;
         }
 
+        // Any key in the query MAP not starting with _ is to be
+        // executed as a single query
         Box reply = Box.newMap();
         try {
             for (Map.Entry<String,Box> queryBox : box.getMap().entrySet()) {
                 // FIXME: Parallelize queries
+                if (queryBox.getKey().startsWith("_")) {
+                    continue;
+                }
                 Box result = executeQuery(queryBox.getValue(), searcher);
                 reply.put(queryBox.getKey(), result);
             }
@@ -172,25 +205,36 @@ public class QueryActor extends BaseActor {
 
     private Box executeQuery(Box queryBox, IndexSearcher searcher)
                  throws MessageFormatException, Box.TypeException, IOException {
-        if (queryBox.getList().size() == 0) {
+        if (queryBox.getMap().size() == 0) {
             return formatMessage("error", "Empty query");
         }
 
-        Query query = parseQuery(queryBox);
+        Box templates = queryBox.get("_templates");
+        int offset = (int)queryBox.getLong("_offset", 0);
+        int count = (int)queryBox.getLong("_count", 20);
+
+        Query query = parseQuery(templates);
 
         // Execute query, collect __body__ fields, parse them as Boxes,
         // and return to sender
+        Box envelope = Box.newMap();
         Box results = Box.newList();
         searcher = takeSearcher(baseName);
-        TopDocs docs = searcher.search(query, 10);
+        TopDocs docs = searcher.search(query, offset+count);
+
         for (ScoreDoc scoreDoc : docs.scoreDocs) {
+            if (--offset >= 0) continue; // skip the first 'offset'-hits
+
             Document doc = searcher.doc(scoreDoc.doc);
             Box resultBox = boxParser.parse(
                     doc.getField("_body").stringValue());
             results.add(resultBox);
         }
+        envelope.put("_count", results.size());
+        envelope.put("_total", docs.totalHits);
+        envelope.put("_data", results);
 
-        return results;
+        return envelope;
     }
 
     private IndexSearcher takeSearcher(String base) throws IOException {
