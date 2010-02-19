@@ -106,13 +106,12 @@ import java.util.Map;
 public class QueryActor extends BaseActor {
 
     private BoxParser boxParser;
-    private Analyzer indexAnalyzer;
+    private QueryParser queryParser;
 
     public QueryActor(String baseName) {
         super(baseName);
         boxParser = new JSonBoxParser();
-        indexAnalyzer = new StandardAnalyzer(
-                                Version.LUCENE_CURRENT, Collections.EMPTY_SET);
+        queryParser = new QueryParser();
     }
 
     @Override
@@ -162,6 +161,7 @@ public class QueryActor extends BaseActor {
         // Any key in the query MAP not starting with _ is to be
         // executed as a single query
         Box reply = Box.newMap();
+        HTTP.Status status = HTTP.Status.OK;
         try {
             for (Map.Entry<String,Box> queryBox : box.getMap().entrySet()) {
                 // FIXME: Parallelize queries
@@ -174,17 +174,21 @@ public class QueryActor extends BaseActor {
         } catch (MessageFormatException e) {
             reply = formatMessage("error",
                                   "Invalid message format: %s", e.getMessage());
+            status = HTTP.Status.BadRequest;
         } catch (Box.TypeException e) {
             reply = formatMessage("error",
                                   "Invalid message type: %s", e.getMessage());
+            status = HTTP.Status.BadRequest;
         } catch (IOException e) {
             reply = formatMessage("error",
                                   "Error executing query: %s", e.getMessage());
+            status = HTTP.Status.InternalError;
         } catch (Throwable t) {
             t.printStackTrace();
             String hint = t.getMessage();
             hint = hint != null ? hint : t.getClass().getSimpleName();
             reply = formatMessage("error", "Internal error: %s", hint);
+            status = HTTP.Status.InternalError;
         } finally {
             try {
                 releaseSearcher(searcher);
@@ -192,15 +196,11 @@ public class QueryActor extends BaseActor {
                 reply = formatMessage("error",
                                       "Error releasing searcher: %s",
                                       e.getMessage());
+                status = HTTP.Status.InternalError;
             }
 
-            send(new HTTPResponse(HTTP.Status.OK, reply), message.getReplyTo());
+            send(new HTTPResponse(status, reply), message.getReplyTo());
         }
-
-
-
-
-
     }
 
     private Box executeQuery(Box queryBox, IndexSearcher searcher)
@@ -213,7 +213,7 @@ public class QueryActor extends BaseActor {
         int offset = (int)queryBox.getLong("_offset", 0);
         int count = (int)queryBox.getLong("_count", 20);
 
-        Query query = parseQuery(templates);
+        Query query = queryParser.parseTemplates(templates.getList());
 
         // Execute query, collect __body__ fields, parse them as Boxes,
         // and return to sender
@@ -248,106 +248,9 @@ public class QueryActor extends BaseActor {
         if (searcher != null) searcher.close();
     }
 
-    public Query parseQuery (Box box) throws MessageFormatException {
-        BooleanQuery q = new BooleanQuery();
-        for (Box tmpl : box.getList()) {
-            tmpl.checkType(Box.Type.MAP);
-            BooleanQuery qTmpl = new BooleanQuery();
-            for (Map.Entry<String,Box> entry : tmpl.getMap().entrySet()) {
-                // FIXME: handle nested objects, right now we require a string, see TODO file
-                FieldSpec field = parseFieldSpec(entry.getKey());
 
-                Box valueBox = entry.getValue();
-                switch (valueBox.getType()) {
-                    case INT:
-                        long lval = valueBox.getLong();
-                        qTmpl.add(NumericRangeQuery.newLongRange(
-                                field.name, lval, lval, true, true), field.occur);
-                        break;
-                    case FLOAT:
-                        double dval = valueBox.getFloat();
-                        qTmpl.add(NumericRangeQuery.newDoubleRange(
-                                field.name, dval, dval, true, true), field.occur);
-                        break;
-                    case BOOLEAN:
-                        qTmpl.add(new TermQuery(new Term(
-                                field.name, valueBox.toString())), field.occur);
-                        break;
-                    case STRING:
-                        if (field.isPrefix) {
-                            qTmpl.add(new PrefixQuery(new Term(
-                               field.name, valueBox.getString())), field.occur);
-                        } else {
-
-                            qTmpl.add(parseIndexQuery(
-                                  field.name, valueBox.getString(), Occur.MUST),
-                                  field.occur);
-                        }
-                        break;
-                    case MAP:
-                    case LIST:
-                        throw new UnsupportedOperationException("FIXME");
-                }
-            }
-            q.add(qTmpl, Occur.SHOULD);
-        }
-
-        return q;
-    }
-
-    /* Create a query on a given field by tokenizing a string with
-     * the indexAnalyzer, joining all terms with the boolean op. termJoin */
-    private Query parseIndexQuery(String field, String query, Occur termJoin) {
-        BooleanQuery indexQuery = new BooleanQuery();
-        try {
-            TokenStream tokens = indexAnalyzer.reusableTokenStream(
-                                                   "", new StringReader(query));
-            while(tokens.incrementToken()) {
-                TermAttribute term = tokens.getAttribute(TermAttribute.class);
-                indexQuery.add(
-                        new TermQuery(new Term(field, term.term())), termJoin);
-            }
-        } catch (IOException e) {
-            e.printStackTrace();
-            System.err.println(
-                          "I/O error parsing query. This should never happen");
-            return new TermQuery(new Term("_error", ""));
-        }
-
-        return indexQuery;
-    }
 
     public static String baseAddress(CharSequence base) {
         return "/_query_"+base;
-    }
-
-    private static class FieldSpec {
-        public Occur occur;
-        public String name;
-        public boolean isPrefix;
-        public boolean isNegated;
-    }
-
-    private FieldSpec parseFieldSpec(String field) {
-        FieldSpec spec = new FieldSpec();
-        spec.occur = Occur.MUST;
-        spec.isNegated = field.startsWith("!");
-        spec.isPrefix = field.endsWith("*");
-        // Note: We could use other begin/end chars, like <, >, +, - etc.
-        //       to define range queries etc.
-
-        if (spec.isNegated && spec.isPrefix) {
-            spec.name = field.substring(1, field.length() -1);
-            spec.occur = Occur.MUST_NOT;
-        } else if (spec.isNegated) {
-            spec.name = field.substring(1, field.length());
-            spec.occur = Occur.MUST_NOT;
-        } else if (spec.isPrefix) {
-            spec.name = field.substring(0, field.length() -1);
-        } else {
-            spec.name = field;
-        }
-
-        return spec;
-    }
+    }    
 }
