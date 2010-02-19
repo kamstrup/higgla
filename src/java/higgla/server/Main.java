@@ -32,12 +32,13 @@ public class Main {
         // Set up all central actors
         Actor writer = new WriterGatewayActor();
         Actor query = new QueryGatewayActor();
-        Actor get = new GetActor();
+        Actor count = new CountGatewayActor();
+        //Actor get = new GetActor();
 
         // Start actors
         MessageBus.getDefault().start(writer.getAddress());
         MessageBus.getDefault().start(query.getAddress());
-        MessageBus.getDefault().start(get.getAddress());
+        MessageBus.getDefault().start(count.getAddress());
 
         // Set up the HTTP server
         HTTPServer server = null;
@@ -58,8 +59,8 @@ public class Main {
         //            "^/[^/]+/search\\?.+$", search.getAddress(), HTTP.Method.GET);
         //server.registerHandler(
         //            "^/[^/]+/changes\\?.+$", changes.getAddress(), HTTP.Method.GET);
-        //server.registerHandler(
-        //            "^/[^/]+/count/?$", count.getAddress(), HTTP.Method.GET);
+        server.registerHandler(
+                    "^/[^/]+/count/?$", count.getAddress(), HTTP.Method.GET);
         //server.registerHandler(
         //            "^/[^/]+/[^/]+$", get.getAddress(), HTTP.Method.GET);
         //server.registerHandler(
