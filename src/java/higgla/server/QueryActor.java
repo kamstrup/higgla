@@ -219,7 +219,6 @@ public class QueryActor extends BaseActor {
         // and return to sender
         Box envelope = Box.newMap();
         Box results = Box.newList();
-        searcher = takeSearcher(baseName);
         TopDocs docs = searcher.search(query, offset+count);
 
         for (ScoreDoc scoreDoc : docs.scoreDocs) {
