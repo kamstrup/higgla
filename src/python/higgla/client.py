@@ -66,8 +66,8 @@ class Session:
     def get(self, *ids):
         if not isinstance(ids, (list,tuple)):
             raise TypeError(
-                       "Ids must be a list, found %s" % type(ids))
-        return self.send("GET", self._base +"/"+",".join(ids), "")
+                       "Ids must be a list or tuple, found %s" % type(ids))
+        return self.send("GET", self._base, ids)
 
     def store(self, *boxes):
         msg = {}
@@ -91,7 +91,7 @@ class Session:
         return body
 
     def _check_error(self, body):
-        if body.has_key("error"):
+        if isinstance(body,dict) and body.has_key("error"):
             error = body["error"]
             if error == "conflict":
                 raise VersionConflict(body["__id__"], box["__rev__"])

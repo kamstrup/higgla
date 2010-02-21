@@ -4,9 +4,9 @@ if __name__ == "__main__":
     from higgla.client import *
     session = higgla.client.Session("mybase")
 
-    print "LOOKUP mydoc1 AND mydoc2 RESULTS"
+    print "LOOKUP mke AND foobar RESULTS"
     try:
-        print str(session.get("mydoc1", "mydoc2"))
+        print str(session.get("mke", "mydoc2"))
     except HigglaException, e:
         print e
     print ""

@@ -74,7 +74,7 @@ class HTTPTransaction:
             msg += "%s: %s\r\n" % (k, v)
         msg += "\r\n"
         if body:
-            if isinstance(body, (dict,list)):
+            if isinstance(body, (dict,list,tuple)):
                 body = json.dumps(body)
             else:
                 body = str(body)
