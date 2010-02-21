@@ -30,7 +30,7 @@
     }'
 
   DEPENDENCIES
-   * juglr >= 0.3.1
+   * juglr >= 0.3.2
    * lucene-core > 3.0.0
    * jsr166 (for Juglr)
    * Java 6+

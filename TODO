@@ -1,15 +1,10 @@
 TODO for Higgla
 ---------------
 
- * Optimize writing by caching the IndexWriter
  * Optimize querying by caching the index reader+searcher
  * Allow indexing and querying of nested objects by concatenating field names
    with '#', '/', or some other suitable character
- * Implement document versioning, with an eye towards distribution and
-   replication
  * Alternative indexing of documents:
   - Allow verbatim/keyword fields by having a __keys__ list, just like
     the __index__ list currently used
- * Consider if/how we do paging of large result sets
  * Consider if/how to do sorting
- * Consider if/how to do prefix queryies and negations
