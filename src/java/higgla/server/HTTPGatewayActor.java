@@ -32,4 +32,15 @@ public abstract class HTTPGatewayActor extends Actor {
         send(resp, request.getReplyTo());
     }
 
+    protected CharSequence extractBaseFromUri(CharSequence uri) {
+        // We assume that 'uri' looks like '/$basename/query...'
+        int uriLength = uri.length();
+        int baseEnd = 1;
+        for (; baseEnd < uriLength; baseEnd++) {
+            if (uri.charAt(baseEnd) == '/') break;
+        }
+
+        return uri.subSequence(1, baseEnd);
+    }
+
 }

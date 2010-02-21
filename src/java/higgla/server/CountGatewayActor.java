@@ -35,14 +35,7 @@ public class CountGatewayActor extends HTTPGatewayActor {
     }
 
     private Address findCountActorForUri(CharSequence uri) {
-        // We assume that 'uri' looks like '/$basename/query...'
-        int uriLength = uri.length();
-        int baseEnd = 1;
-        for (; baseEnd < uriLength; baseEnd++) {
-            if (uri.charAt(baseEnd) == '/') break;
-        }
-
-        CharSequence base = uri.subSequence(1, baseEnd);
+        CharSequence base = extractBaseFromUri(uri);
         Address countAddress = getBus().lookup(CountActor.baseAddress(base));
 
         if (countAddress == null) {

@@ -35,14 +35,7 @@ public class QueryGatewayActor extends HTTPGatewayActor {
     }
 
     private Address findQueryActorForUri(CharSequence uri) {
-        // We assume that 'uri' looks like '/$basename/query...'
-        int uriLength = uri.length();
-        int baseEnd = 1;
-        for (; baseEnd < uriLength; baseEnd++) {
-            if (uri.charAt(baseEnd) == '/') break;
-        }
-
-        CharSequence base = uri.subSequence(1, baseEnd);
+        CharSequence base = extractBaseFromUri(uri);
         Address queryAddress = getBus().lookup(QueryActor.baseAddress(base));
 
         if (queryAddress == null) {

@@ -45,7 +45,7 @@ public class WriterGatewayActor extends HTTPGatewayActor {
         // sent to the replyTo of 'message' and not this actor
         body.setReplyTo(message.getReplyTo());
 
-        String baseName = getBase(req.getUri()).toString();
+        String baseName = extractBaseFromUri(req.getUri()).toString();
         Address writerAddress = findWriterActorForBase(baseName);
 
 
@@ -95,17 +95,6 @@ public class WriterGatewayActor extends HTTPGatewayActor {
         }
 
         send(transaction, writerAddress);
-    }
-
-    private CharSequence getBase(CharSequence uri) {
-        // We assume that 'uri' looks like '/$basename/query...'
-        int uriLength = uri.length();
-        int baseEnd = 1;
-        for (; baseEnd < uriLength; baseEnd++) {
-            if (uri.charAt(baseEnd) == '/') break;
-        }
-
-        return uri.subSequence(1, baseEnd);
     }
 
     private Address findWriterActorForBase(CharSequence baseName) {
