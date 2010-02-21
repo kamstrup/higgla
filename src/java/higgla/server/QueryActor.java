@@ -213,6 +213,11 @@ public class QueryActor extends BaseActor {
         int offset = (int)queryBox.getLong("_offset", 0);
         int count = (int)queryBox.getLong("_count", 20);
 
+        if (templates == null) {
+            throw new MessageFormatException(
+                                  "Query does not contain a _templates list");
+        }
+
         Query query = queryParser.parseTemplates(templates.getList());
 
         // Execute query, collect __body__ fields, parse them as Boxes,
