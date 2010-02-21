@@ -19,29 +19,36 @@ import juglr.Box;
 public class Query {
 
     private Box box;
+    private String name;
 
     /**
-     * Create a new query targetting {@code base}
-     * @param base
+     * Create a new named query
+     * @param queryName a name to identify this query by
      */
-    Query(String base) {
+    Query(String queryName) {
         box = Box.newMap();
-        box.put("__base__", base);
-        box.put("__query__", Box.newList());
+        box.put("_templates", Box.newList());
+        name = queryName;
     }
 
     public Query addTemplate(Box template) {
         template.checkType(Box.Type.MAP);
-        box.get("__query__").add(template);
+        box.get("_templates").add(template);
         return this;
     }
 
-    public void setBase(String base) {
-        box.put("__base__", base);
+    public Query setOffset(int offset) {
+        box.put("_offset", offset);
+        return this;
     }
 
-    public String getBase() {
-        return box.getString("__base__");
+    public Query setCount(int count) {
+        box.put("_count", count);
+        return this;
+    }
+
+    public String getName() {
+        return name;
     }
 
     Box getRawQuery() {

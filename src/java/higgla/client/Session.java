@@ -23,7 +23,7 @@ import java.util.List;
  */
 public class Session {
 
-    public static final String USER_AGENT = "Higgla/0.0.1";
+    public static final String USER_AGENT = "Higgla/0.0.2";
 
     private InetAddress host;
     private String base;
@@ -43,19 +43,21 @@ public class Session {
      * document you commit it to the storage by calling
      * {@link #store}.
      * @param id The id the document should be stored under
+     * @param revision the revision number last seen for this box. Set to 0
+     *                 for new boxes
      * @param indexFields A list of fields to create full text indexes for.
      *                    It is not an error if these fields are not present in
      *                    the document when stored
      * @return A box of {@code MAP} type that you can add fields to
      */
-    public Box newDocument(String id, long revision, String... indexFields) {
+    public Box prepareBox(String id, long revision, String... indexFields) {
         Box box = Box.newMap();
-        box.put("__id__", id);
-        box.put("__rev__", revision);
+        box.put("_id", id);
+        box.put("_rev", revision);
 
         if (indexFields.length > 0) {
             Box index = Box.newList();
-            box.put("__index__", index);
+            box.put("_index", index);
             for (String field : indexFields) {
                 index.add(field);
             }
@@ -65,23 +67,24 @@ public class Session {
     }
 
     /**
-     * Prepare a document for storage in Higgla. When you have build the
-     * document you commit it to the storage by calling
-     * {@link #store}.
+     * Prepare a box for storage in Higgla. When you have build the
+     * box you commit it to the storage by calling {@link #store}.
      * @param id The id the document should be stored under
+     * @param revision the revision number last seen for this box. Set to 0
+     *                 for new boxes
      * @param indexFields A list of fields to create full text indexes for.
      *                    It is not an error if these fields are not present in
      *                    the document when stored
      * @return A box of {@code MAP} type that you can add fields to
      */
-    public Box newDocument(
+    public Box prepareBox(
                        String id, long revision, Iterable<String> indexFields) {
-        Box box = newDocument(id, revision);
+        Box box = prepareBox(id, revision);
         Box index = null;
         for (String field : indexFields) {
             if (index == null) {
                 index = Box.newList();
-                box.put("__index__", index);
+                box.put("_index", index);
             }
             index.add(field);
         }
@@ -89,26 +92,33 @@ public class Session {
     }
 
     /**
-     * Prepare a query against the base this session is constructed for.
+     * Prepare a named query against the base this session is constructed for.
      * To submit the query use {@link #sendQuery}
+     * @param queryName a name used to identify the query. This is useful
+     *                  if you submit queries in batches
      * @return a query you should add templates to, and later submit to
      *         {@link #sendQuery}
      */
-    public Query prepareQuery() {
-        return new Query(base);
+    public Query prepareQuery(String queryName) {
+        return new Query(queryName);
     }
 
     /**
-     * Send a prepared query to the storage, retrieving all matching boxes
-     * @param q the query to submit
-     * @return a list of all matching boxes
+     * Send a batch of prepared queries to the storage, retrieving all matching
+     * boxes (considering also each query's offset and count).
+     * @param queries a variable number of named queries to send
+     * @return a map mapping query names to result sets. Each result set is a
+     *         map with the keys {@code _count}, {@code total},
+     *         and {@code data}, that last one containing a list of results
      * @throws IOException if there is an error sending the query
      * @throws HigglaException if the server returns an error message
      */
-    public List<Box> sendQuery(Query q) throws IOException, HigglaException {
-        Box rawQuery = q.getRawQuery();
-        Box resp = send(HTTP.Method.POST, "/actor/query/", rawQuery);
-        return resp.getList("__results__");
+    public Box sendQuery(Query... queries) throws IOException, HigglaException {
+        Box envelope = Box.newMap();
+        for (Query q : queries) {
+            envelope.put(q.getName(), q.getRawQuery());
+        }
+        return send(HTTP.Method.GET, "/"+base, envelope);
     }
 
     /**
@@ -123,13 +133,10 @@ public class Session {
      */
     public Box store(Box... boxes) throws IOException, HigglaException {
         Box envelope = Box.newMap();
-        Box list = Box.newList();
         for (Box box : boxes) {
-            list.add(box);
+            envelope.put(box.get("_id").getString(), box);
         }
-        envelope.put("__store__", list);
-        envelope.put("__base__", base);
-        return send(HTTP.Method.POST, "/actor/store/", envelope);
+        return send(HTTP.Method.POST, "/"+base, envelope);
     }
 
     /**
@@ -144,12 +151,10 @@ public class Session {
      */
     public Box store(Iterable<Box> boxes) throws IOException, HigglaException {
         Box envelope = Box.newMap();
-        Box list = Box.newList();
         for (Box box : boxes) {
-            list.add(box);
+            envelope.put(box.get("_id").getString(), box);
         }
-        envelope.put("__store__", list);
-        return send(HTTP.Method.POST, "/actor/store/", envelope);
+        return send(HTTP.Method.POST, "/"+base, envelope);
     }
 
     /**
