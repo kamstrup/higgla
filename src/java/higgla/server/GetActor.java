@@ -1,6 +1,7 @@
 package higgla.server;
 
 import juglr.*;
+import juglr.net.HTTP;
 import org.apache.lucene.document.Document;
 import org.apache.lucene.index.IndexReader;
 import org.apache.lucene.index.Term;
@@ -41,53 +42,73 @@ import java.util.List;
  * @author Mikkel Kamstrup Erlandsen <mailto:mke@statsbiblioteket.dk>
  * @since Feb 1, 2010
  */
-public class GetActor extends HigglaActor {
+public class GetActor extends BaseActor {
 
     private BoxParser boxParser;
 
-    public GetActor() {
-        super("__ids__", "__base__");
+    public GetActor(String baseName) {
+        super(baseName);
         boxParser = new JSonBoxParser();
     }
 
     @Override
-    public void react(Message message) {
-        Box box;
+    public void start() {
         try {
-            box = validate(message);
-        } catch (MessageFormatException e) {
-            send(
-               formatMsg("error", "Invalid message format: %s", e.getMessage()),
-               message.getReplyTo());
+            getBus().allocateNamedAddress(this,
+                                          GetActor.baseAddress(baseName));
+        } catch (AddressAlreadyOwnedException e) {
+            // Another GetActor is already running for this base.
+            // Retract from the bus silently
+            getBus().freeAddress(getAddress());
+        }
+    }
+
+    public static String baseAddress(String baseName) {
+        return "/_get_" + baseName;
+    }
+
+    @Override
+    public void react(Message message) {
+         if (!(message instanceof Box)) {
+            replyTo(message, HTTP.Status.InternalError, "error",
+                    "Expected Box. Found '%s'", message.getClass().getName());
+            return;
+        }
+
+        Box box = (Box)message;
+        if (box.getType() != Box.Type.LIST) {
+            replyTo(message, HTTP.Status.BadRequest, "error",
+                    "Expected LIST. Got '%s'", box.getType());
+            return;
+        }
+
+        List<Box> ids = box.getList();
+        if (ids.size() == 0) {
+            replyTo(message, HTTP.Status.BadRequest, "error",
+                    "No ids specified in request");
             return;
         }
 
         // Parse the query
-        String base = box.getString("__base__");
-        List<Box> ids = box.getList("__ids__");
         Query[] queries;
         try {
             queries = parseQueries(ids);
         } catch (MessageFormatException e) {
-            send(
-               formatMsg("error", "Invalid message format: %s", e.getMessage()),
-               message.getReplyTo());
+            replyTo(message, HTTP.Status.BadRequest,
+                    "error", "Invalid message format: %s", e.getMessage());
             return;
         } catch (Box.TypeException e) {
-            send(
-               formatMsg("error", "Invalid message type: %s", e.getMessage()),
-               message.getReplyTo());
+            replyTo(message, HTTP.Status.BadRequest,
+                    "error", "Invalid message type: %s", e.getMessage());
             return;
         }
 
-        // Execute query, collect __body__ fields, parse them as Boxes,
+        // Execute query, collect _body fields, parse them as Boxes,
         // and return to sender
         IndexSearcher searcher = null;
-        Box envelope = Box.newMap();
         Box results = Box.newList();
-        envelope.put("__results__", results);
         try {
-            searcher = takeSearcher(base);
+            searcher = takeSearcher();
             for (int i = 0; i < ids.size(); i++) {
                 TopDocs docs = searcher.search(queries[i], 1);
                 if (docs.scoreDocs.length == 0) {
@@ -95,36 +116,33 @@ public class GetActor extends HigglaActor {
                 } else {
                     Document doc = searcher.doc(docs.scoreDocs[0].doc);
                     Box resultBox = boxParser.parse(
-                                        doc.getField("__body__").stringValue());
+                                        doc.getField("_body").stringValue());
                     results.add(resultBox);
                 }
             }
-            send(envelope, message.getReplyTo());
+            send(results, message.getReplyTo());
         } catch (IOException e) {
-            send(
-               formatMsg("error", "Error executing query: %s", e.getMessage()),
-               message.getReplyTo());
+            replyTo(message, HTTP.Status.InternalError,
+                    "error", "Error executing query: %s", e.getMessage());
         } catch (Throwable t) {
             t.printStackTrace();
             String hint = t.getMessage();
             hint = hint != null ? hint : t.getClass().getSimpleName();
-            send(
-                  formatMsg("error", "Internal error: %s", hint),
-                  message.getReplyTo());
+            replyTo(message, HTTP.Status.InternalError,
+                    "error", "Internal error: %s", hint);
         } finally {
             try {
                 releaseSearcher(searcher);
             } catch (IOException e) {
-                send(
-                  formatMsg("error", "Error releasing searcher: %s", e.getMessage()),
-                  message.getReplyTo());
+                replyTo(message, HTTP.Status.InternalError,
+                  "error", "Error releasing searcher: %s", e.getMessage());
             }
         }
     }
 
-    private IndexSearcher takeSearcher(String base) throws IOException {
+    private IndexSearcher takeSearcher() throws IOException {
         // FIXME: Optimize this by caching the reader/searcher
-        File indexDir = new File(base);
+        File indexDir = new File(baseName);
         IndexReader reader = IndexReader.open(FSDirectory.open(indexDir));
         return new IndexSearcher(reader);
     }
@@ -133,14 +151,11 @@ public class GetActor extends HigglaActor {
         if (searcher != null) searcher.close();
     }
 
-    private BooleanQuery[] parseQueries(List<Box> ids) {
-        BooleanQuery[] q = new BooleanQuery[ids.size()];
+    private Query[] parseQueries(List<Box> ids) {
+        Query[] q = new Query[ids.size()];
 
         for (int i = 0; i < ids.size(); i++) {
-            q[i] = new BooleanQuery();
-            String id = ids.get(i).getString();
-            q[i].add(new TermQuery(new Term(
-                    "__id__", id)), BooleanClause.Occur.SHOULD);
+            q[i] = new TermQuery(new Term("_id", ids.get(i).getString()));
         }
         
         return q;

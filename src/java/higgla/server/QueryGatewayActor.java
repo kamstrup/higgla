@@ -7,13 +7,17 @@ import juglr.net.HTTP;
 import juglr.net.HTTPRequest;
 
 /**
- * Takes a {@link HTTPRequest} and routes it to the right {@link QueryActor} -
- * creating the relevant query actor if it is not registered on the bus.
+ * Takes a {@link HTTPRequest} and routes it to the right delegate.
+ * If the request body is a MAP then it's passed to a {@link QueryActor} -
+ * and if it's a LIST it's passed to a {@link GetActor}. In either case,
+ * if the recipient actor isn't registered on the bus it will be created
+ * automatically.
  *
  * @author Mikkel Kamstrup Erlandsen <mailto:mke@statsbiblioteket.dk>
  * @since Feb 17, 2010
  */
 public class QueryGatewayActor extends HTTPGatewayActor {
+    
     @Override
     public void react(Message message) {
         if (!(message instanceof HTTPRequest)) {
@@ -30,8 +34,17 @@ public class QueryGatewayActor extends HTTPGatewayActor {
         // sent to the replyTo of 'message' and not this actor
         body.setReplyTo(message.getReplyTo());
 
-        Address queryAddress = findQueryActorForUri(req.getUri());
-        send(body, queryAddress);
+        Address delegate;
+        if (body.getType() == Box.Type.MAP) {
+             delegate = findQueryActorForUri(req.getUri());
+        } else if (body.getType() == Box.Type.LIST) {
+            delegate = findGetActorForUri(req.getUri());
+        } else {
+            replyTo(message, HTTP.Status.BadRequest,
+                    "error", "Expected MAP or LIST. Found %s", body.getType());
+            return;
+        }
+        send(body, delegate);
     }
 
     private Address findQueryActorForUri(CharSequence uri) {
@@ -44,5 +57,17 @@ public class QueryGatewayActor extends HTTPGatewayActor {
         }
 
         return queryAddress;
+    }
+
+    private Address findGetActorForUri(CharSequence uri) {
+        String base = extractBaseFromUri(uri).toString();
+        Address getAddress = getBus().lookup(GetActor.baseAddress(base));
+
+        if (getAddress == null) {
+            getAddress = new GetActor(base).getAddress();
+            getBus().start(getAddress);
+        }
+
+        return getAddress;
     }
 }
